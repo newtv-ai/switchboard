@@ -1,0 +1,38 @@
+{
+  "name": "@switchboard/server",
+  "version": "0.1.0",
+  "description": "Switchboard HTTP+WS server. CLI entrypoint.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "switchboard": "./dist/index.js",
+    "sw": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^10.0.1",
+    "@switchboard/core": "0.1.0",
+    "@switchboard/sdk": "0.1.0",
+    "fastify": "^4.28.1",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.3.5"
+  },
+  "tsup": {
+    "entry": ["src/index.ts"],
+    "format": ["esm"],
+    "dts": false,
+    "clean": true,
+    "sourcemap": true,
+    "target": "node18",
+    "external": ["node-pty"]
+  }
+}

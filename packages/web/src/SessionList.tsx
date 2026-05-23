@@ -1,0 +1,127 @@
+import { useEffect, useRef, useState } from 'react';
+import type { ClientMessage, ServerMessage, SessionSummary } from './protocol.js';
+import { WS_BASE } from './ws-url.js';
+
+export interface SessionListProps {
+  onAttach(sessionId: string): void;
+  onCreate(adapterId: string): void;
+}
+
+type ConnState = 'connecting' | 'open' | 'closed' | 'error';
+
+export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Element {
+  const [conn, setConn] = useState<ConnState>('connecting');
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const ws = new WebSocket(`${WS_BASE}/ws`);
+    wsRef.current = ws;
+
+    ws.onopen = () => setConn('open');
+    ws.onerror = () => setConn('error');
+    ws.onclose = () => setConn('closed');
+    ws.onmessage = (e: MessageEvent<string>) => {
+      let msg: ServerMessage;
+      try {
+        msg = JSON.parse(e.data) as ServerMessage;
+      } catch {
+        return;
+      }
+      if (msg.type === 'sessions') setSessions(msg.list);
+    };
+
+    return () => {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      wsRef.current = null;
+    };
+  }, []);
+
+  const refresh = (): void => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      const msg: ClientMessage = { type: 'list' };
+      ws.send(JSON.stringify(msg));
+    }
+  };
+
+  return (
+    <div className="list-view">
+      <header>
+        <h1>Switchboard</h1>
+        <span className={`status status-${conn}`}>{conn}</span>
+        <button type="button" className="btn" onClick={refresh} disabled={conn !== 'open'}>
+          Refresh
+        </button>
+      </header>
+
+      <main>
+        {sessions.length === 0 ? (
+          <EmptyState onCreate={onCreate} />
+        ) : (
+          <ul className="session-list">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <button type="button" className="session-card" onClick={() => onAttach(s.id)}>
+                  <div className="session-card-row">
+                    <span className="session-name">{s.name}</span>
+                    <span className={`session-state state-${s.state}`}>{s.state}</span>
+                  </div>
+                  <div className="session-card-row session-meta">
+                    <span className="session-source">{s.source}</span>
+                    <span className="session-adapter">{s.adapterDisplayName}</span>
+                    <span className="session-cwd" title={s.cwd}>
+                      {s.cwd}
+                    </span>
+                  </div>
+                  <div className="session-card-row session-meta">
+                    <span className="session-activity">{relativeTime(s.lastActivityAt)}</span>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </main>
+
+      <footer className="list-footer">
+        <button type="button" className="btn btn-secondary" onClick={() => onCreate('passthrough')}>
+          + New passthrough session
+        </button>
+      </footer>
+    </div>
+  );
+}
+
+function EmptyState({ onCreate }: { onCreate(adapterId: string): void }): JSX.Element {
+  return (
+    <div className="empty-state">
+      <p className="empty-title">No sessions yet</p>
+      <p className="empty-hint">
+        On your dev box, run:
+        <code> switchboard run claude </code>
+        (or any other CLI) in a normal terminal. It'll appear here.
+      </p>
+      <p className="empty-hint">Or start a server-spawned shell from here:</p>
+      <button type="button" className="btn" onClick={() => onCreate('passthrough')}>
+        + New passthrough session
+      </button>
+    </div>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const seconds = Math.floor((Date.now() - then) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(iso).toLocaleString();
+}
