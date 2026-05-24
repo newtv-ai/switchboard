@@ -1,7 +1,11 @@
 # Switchboard — Project Specification
 
+> **One phone, every AI coding CLI.** Self-hostable web app + plugin-based adapter system + native PTY relay. This document is the design source of truth.
+>
 > **Status**: Draft v0.9 · Last updated: 2026-05-23 · Phase 1 ✅ · Phase 2 ✅ · Phase 3 next
 > **This document is the single source of truth.** Any new feature, scope change, or architectural decision MUST be reflected here before/during implementation. If implementation drifts from this doc, the doc is fixed (or the implementation is rolled back). See §11 Change Log for how to update.
+>
+> 🌐 **Languages**: English · [中文](./SPEC.zh-CN.md)
 
 ---
 
@@ -9,7 +13,7 @@
 
 A self-hostable web app that lets a developer drive AI coding CLIs (Claude Code, Codex, Antigravity, …) on their dev machine from a phone browser over Tailscale. Plugin-based: each agent ships as an adapter package. Core is agent-agnostic PTY relay so new agents work day-one in raw mode while adapters add semantic UX (chat view, diff viewer, quick-action buttons, push notifications).
 
-**Why this exists** — existing tools either screen-share the desktop (laggy, bad on phones: Tailscale+RustDesk), or are tightly coupled to one agent (slopus/happy = Claude+Codex but no public plugin API, Windows server undocumented, AGPL-ish concerns on derivatives).
+**Why choose Switchboard** — purpose-built for phone-controlled CLI coding: native PTY relay stays smooth on cellular without screen-share artifacts; a public plugin API lets any new agent CLI drop in as a small adapter; Windows servers are a first-class target (ConPTY-aware); MIT-licensed so derivatives stay friction-free.
 
 ---
 
@@ -308,7 +312,7 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 
 ### 5.4 Future: `adapter-antigravity` (deferred)
 - Will land when Antigravity 2.0 has stable output format
-- Tracked in §9 Open Questions
+- Opened to contribution in §12
 
 ---
 
@@ -436,23 +440,17 @@ Phone-usability follow-ups landed alongside Phase 2 (would otherwise be Phase 5)
 ### Phase 6 — Multi-session & Project Switcher polish  (target: 2-3 days) — was Phase 5
 - [ ] Home screen lists all sessions with state badges
 - [ ] Create-session flow: pick adapter, pick cwd (autocomplete from recent), pick initial prompt
-- [ ] Sessions survive server restart? (Decision: NO for v1 — process tree dies with parent. Persistent sessions deferred. See §9.)
+- [ ] Sessions survive server restart? (Decision: NO for v1 — process tree dies with parent. Persistent sessions deferred and opened to contribution in §12.)
 - [ ] Gate: 3 parallel sessions on different projects, switch between them on phone without losing state
 
 ### Phase 7 — Polish & Open-source Release  (target: 1 week)
-- [ ] README with install gif, feature list, comparison vs alternatives
+- [ ] README with feature list, "why Switchboard" highlights
 - [ ] `docs/adapter-authoring.md` with worked example
 - [ ] `examples/adapter-template/` ready to fork
 - [ ] CI: lint + typecheck + tests + multi-platform build matrix (windows/macos/linux)
 - [ ] npm publish under chosen scope (see §10)
 - [ ] GitHub release with binaries (optional, via pkg)
 - [ ] Gate: a stranger can `npm i -g <name>` on a fresh Windows machine and have it working in under 5 minutes
-
-### Phase 8+ — Future (not committed)
-- `adapter-antigravity` when Antigravity 2.0 stabilizes
-- Persistent sessions across server restarts (tmux-style hand-off, or detached node child)
-- Voice input
-- Session sharing (multi-device read-only follow)
 
 ---
 
@@ -462,7 +460,7 @@ Phone-usability follow-ups landed alongside Phase 2 (would otherwise be Phase 5)
 |---|---|---|---|
 | ~~Q1~~ | ~~Final project name~~ | ~~Before Phase 7~~ | **Resolved 2026-05-23**: `switchboard`. See §10. |
 | ~~Q2~~ | ~~npm scope~~ | ~~Before Phase 7~~ | **Resolved 2026-05-23**: `@switchboard/*`. See §10. |
-| Q3 | Persistent sessions strategy | Phase 5 design | Defer to v1.1 — for v1, sessions die with server |
+| ~~Q3~~ | ~~Persistent sessions strategy~~ | ~~Phase 5 design~~ | **Moved 2026-05-24**: out of v1 scope; opened to contribution in §12 |
 | Q4 | Should adapters be sandboxed (separate process)? | Phase 2 design | NO for v1 — adapters are npm code, trust same as core |
 | Q5 | Push notification provider — VAPID self-hosted vs a relay service? | Phase 4 | Self-hosted VAPID; user generates keys on first run |
 | Q6 | How to handle Claude Code login flow (browser OAuth) over phone WS? | Phase 2 testing | Probably "open this URL on a desktop" message; phones can't drive the localhost callback |
@@ -518,12 +516,64 @@ This is the rule for keeping the spec from rotting:
 
 ---
 
-## 12. References
+## 12. For Other Developers — Open to Contribution
 
-- slopus/happy — github.com/slopus/happy (primary inspiration; we exist because it lacks a public plugin API and Windows-native server path)
+The following items are **not on the committed roadmap**, but would all be welcome PRs. Each is scoped tightly enough that a motivated contributor can land it largely independently. If you want to take one on, open an issue first so we can scope the design together.
+
+### Persistent sessions across server / terminal restart
+
+Today a Switchboard session dies when `switchboard` restarts (Mode B) or the wrapper terminal closes (Mode A). The motivating use case: a long-running agent task shouldn't be lost to a maintenance restart or an accidentally-closed terminal.
+
+Three viable implementation paths, in increasing complexity:
+- **tmux / screen / zellij wrapping** — lightest; requires user to have tmux installed
+- **Detached node daemon** owning the PTY — heaviest; cross-platform PID/handle juggling, no `setsid` on Windows
+- **OS-managed** (systemd user service / launchd / Windows Service) — biggest install footprint, smallest amount of custom code
+
+Or design a pluggable backend so users can pick.
+
+### `adapter-antigravity`
+
+Currently wrapped via `passthrough`. A first-class adapter could parse Antigravity's structured output once 2.0 stabilizes (no SDK as of 2026-05). Skills needed: TypeScript, comfort reading TUI byte streams. Use `packages/adapter-codex` as a worked example.
+
+### Voice input
+
+WebSpeech API → PTY input on phone. Tap-to-talk and push-to-talk modes. iOS Safari support is the tricky part — Chrome on Android works out of the box.
+
+### Session sharing (multi-device read-only follow)
+
+Multiple devices follow the same session without input rights. Useful for pair-programming or live demos. Requires adding a per-attachment `mode: "rw" | "r"` to the WS protocol and a UI affordance to claim/release the writer slot.
+
+### Multi-user collaborative sessions over a public domain
+
+Today's threat model assumes a single user on a trusted network (LAN / Tailscale). The natural extension: **put Switchboard behind a reverse proxy on `<your>.dev`, and let multiple developers drive the same agent session together** — pair-programming where one person prompts, another steers, both watch the same TUI live.
+
+What needs to be built:
+- **Multi-user auth** — beyond v1's single bearer token. SSO (Google / GitHub OAuth), per-user identity, per-session ACLs (owner / editor / viewer).
+- **Writer-slot arbitration** — who gets to type when two people try at once? Lock-based (first holder keeps it, others see "X is typing"), or merge-based like CRDT editors. Lock-based is much simpler and probably right for v1.
+- **Presence UI** — connected-user list, "X joined / left" toasts, optional cursor or selection indicators, optional side voice / chat channel.
+- **Reverse-proxy recipe** — a documented setup for nginx / Caddy / Cloudflare Tunnel with WS sticky sessions and sane TLS.
+
+Builds on top of the read-only "session sharing" item above. Touches auth (§4.5) and the `/ws` protocol (§4.2).
+
+### Multi-host control: one phone, many dev machines
+
+Today the phone connects to one Switchboard server on one dev machine. Many users have a home desktop **plus** a work laptop **plus** a cloud VM and want **one phone UI that aggregates sessions across all of them**.
+
+What needs to be built:
+- **Server discovery** — manual list (a config file of `[server.name]` blocks), Tailscale-native (enumerate machines in the tailnet that carry a label), or mDNS on LAN.
+- **Client-side multiplexing** — the PWA holds N WebSocket connections, merges their `sessions` lists into one home screen, attaches to the right server when a session is picked.
+- **Per-server auth** — bearer-token model extended to one token per server; QR-pair flow that registers a new server into the phone.
+- **Tailscale deployment recipe** — recommended layout when every dev machine sits in the same tailnet.
+
+Useful even for solo users (one phone, multiple machines they own), and a prerequisite for any team-scale Switchboard deployment.
+
+---
+
+## 13. References
+
+- slopus/happy — github.com/slopus/happy (primary inspiration; Switchboard extends the same idea with a public plugin API and first-class Windows-native server)
 - Claude Agent SDK — code.claude.com/docs/en/agent-sdk
 - Codex CLI noninteractive — developers.openai.com/codex/noninteractive
 - Codex JSON schema drift — openai/codex#4776, #15451
 - Claude Code Windows ConPTY rendering — anthropics/claude-code#14599, #42670
 - Antigravity 2.0 launch — developers.googleblog.com/build-with-google-antigravity-...
-- Cross-references in memory: [[project-scope]], [[landscape-findings]]

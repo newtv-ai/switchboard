@@ -1,19 +1,30 @@
 # Switchboard
 
-> Drive AI coding CLIs (**Claude Code**, **Codex**, **Antigravity**) on your dev machine from a phone browser. Self-hosted, no cloud relay, no account required.
-
-You run a single command on your dev box, point your phone at `http://<dev-ip>:5173`, and you see the same TUI your desktop sees — type prompts, watch agents work, approve tool calls, all from the phone. Locked to your LAN by default; works over Tailscale for "from anywhere".
-
-Plugin-based: each agent is a tiny adapter so new CLIs (Aider, Gemini-CLI, Cursor's `cursor-agent`, etc.) drop in without touching the core.
+> **One phone, every AI coding CLI** — drive Claude Code, Codex, Antigravity (and whatever ships next) from your phone browser. Self-hosted, plugin-based, no cloud relay.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen)](https://nodejs.org)
-[![Status](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![Agents](https://img.shields.io/badge/agents-Claude%20%7C%20Codex%20%7C%20Antigravity-blue.svg)](#supported-agents)
+[![Plugin API](https://img.shields.io/badge/plugin%20API-public-purple.svg)](./packages/sdk)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-LAN%20%2F%20Tailscale-brightgreen.svg)](#phone-access-lan--tailscale)
+[![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](https://nodejs.org)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](./SPEC.md)
+
+🌐 **Languages**: English · [中文](./README.zh-CN.md)
+
+## Why Switchboard
+
+- **One UI, every agent** — Claude Code, Codex, and Antigravity in the same PWA; no per-tool app to install.
+- **Plugin-based, day-one for new CLIs** — a new agent drops in as a ~50-line adapter; even unsupported CLIs work immediately in raw PTY mode.
+- **Truly self-hosted** — bytes stay on your LAN or Tailscale. No cloud relay, no account, no key escrow.
+- **Wraps your existing terminal** — keep your normal `claude` / `codex` workflow on the desktop; the phone *attaches* to that live session instead of spawning a parallel one.
+
+[5-minute Quickstart →](#install) · [Architecture in 30s](#architecture-in-30-seconds) · [Full SPEC](./SPEC.md)
 
 ---
 
 ## Table of contents
 
+- [Why Switchboard](#why-switchboard)
 - [What it does](#what-it-does)
 - [Architecture in 30 seconds](#architecture-in-30-seconds)
 - [Install](#install)
@@ -275,4 +286,4 @@ switchboard/
 
 ### Acknowledgements
 
-The PTY-wrap architecture is parallel to [slopus/happy](https://github.com/slopus/happy) — credit to them for proving it scales. Switchboard differs in choosing direct LAN/Tailscale over a cloud relay, and in being browser-only (no native app required).
+The PTY-wrap architecture is parallel to [slopus/happy](https://github.com/slopus/happy) — credit to them for proving it scales. Switchboard is built around direct LAN/Tailscale connections and a browser-only client (no native app required).
