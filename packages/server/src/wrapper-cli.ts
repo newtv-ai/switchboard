@@ -267,7 +267,21 @@ export async function runWrapper(argv: string[]): Promise<void> {
   }
   process.stdin.resume();
   process.stdin.on('data', (chunk: Buffer) => {
-    pty.write(chunk.toString('utf8'));
+    // Windows ConPTY translates the BackSpace key to 0x08 (Ctrl+H / BS), but
+    // xterm-style TUIs (claude, codex) bind 0x08 to `backward-kill-word` and
+    // 0x7f (DEL) to `backward-delete-char`. Bare claude in Windows Terminal
+    // receives 0x7f directly; the inner node-pty ConPTY does not perform that
+    // translation, so we do it here. Effect: one BackSpace = one character
+    // (CJK words no longer get word-deleted, English runs no longer get
+    // killed in one stroke).
+    let translated: Buffer = chunk;
+    for (let i = 0; i < chunk.length; i++) {
+      if (chunk[i] === 0x08) {
+        if (translated === chunk) translated = Buffer.from(chunk);
+        translated[i] = 0x7f;
+      }
+    }
+    pty.write(translated.toString('utf8'));
   });
 
   // User-initiated local terminal resize → report new size to server for MIN
