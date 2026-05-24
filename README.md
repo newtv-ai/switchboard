@@ -17,6 +17,7 @@
 - **Plugin-based, day-one for new CLIs** — a new agent drops in as a ~50-line adapter; even unsupported CLIs work immediately in raw PTY mode.
 - **Truly self-hosted** — bytes stay on your LAN or Tailscale. No cloud relay, no account, no key escrow.
 - **Wraps your existing terminal** — keep your normal `claude` / `codex` workflow on the desktop; the phone *attaches* to that live session instead of spawning a parallel one.
+- **Phone never logs into the AI vendor — no ban risk** — Switchboard only relays terminal I/O between your dev box and your phone; the phone never authenticates to (or directly connects to) Anthropic / OpenAI / Google. Every API call still originates from your dev box under your normal identity, so the vendor sees the same desktop client you've always used — nothing to flag as "anomalous mobile / multi-device login."
 
 [5-minute Quickstart →](#install) · [Architecture in 30s](#architecture-in-30-seconds) · [Full SPEC](./SPEC.md)
 
