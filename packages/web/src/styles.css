@@ -348,3 +348,156 @@ header h1 {
 .xterm-viewport::-webkit-scrollbar {
   display: none;
 }
+
+/* ─── File Manager Modal ─────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-content {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 12px;
+  width: calc(100vw - 32px);
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+  background: #252525;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #eee;
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.btn-close:hover {
+  color: #fff;
+}
+
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.upload-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #252525;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px dashed #444;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #888;
+}
+
+.btn-primary {
+  background: #2a5d9c;
+  color: #fff;
+  border: 1px solid #1c4578;
+}
+
+.btn-primary:hover {
+  background: #3470b8;
+}
+
+.files-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.files-list th {
+  text-align: left;
+  padding: 8px;
+  color: #888;
+  border-bottom: 1px solid #333;
+  font-weight: 500;
+}
+
+.files-list td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.filename-cell {
+  position: relative;
+  word-break: break-all;
+}
+
+.progress-bar {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: #2a2a2a;
+  width: 100%;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #5ad48a;
+  transition: width 0.2s ease;
+}
+
+.progress-text {
+  position: absolute;
+  right: 0;
+  top: -18px;
+  font-size: 10px;
+  color: #5ad48a;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.btn-files {
+  font-size: 14px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

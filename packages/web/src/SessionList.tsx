@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FileManager } from './FileManager.js';
 import type { ClientMessage, ServerMessage, SessionSummary } from './protocol.js';
 import { WS_BASE } from './ws-url.js';
 
@@ -12,6 +13,7 @@ type ConnState = 'connecting' | 'open' | 'closed' | 'error';
 export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Element {
   const [conn, setConn] = useState<ConnState>('connecting');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [showFileManager, setShowFileManager] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -54,6 +56,9 @@ export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Eleme
       <header>
         <h1>Switchboard</h1>
         <span className={`status status-${conn}`}>{conn}</span>
+        <button type="button" className="btn btn-files" onClick={() => setShowFileManager(true)}>
+          Upload
+        </button>
         <button type="button" className="btn" onClick={refresh} disabled={conn !== 'open'}>
           Refresh
         </button>
@@ -93,6 +98,7 @@ export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Eleme
           + New passthrough session
         </button>
       </footer>
+      {showFileManager && <FileManager onClose={() => setShowFileManager(false)} />}
     </div>
   );
 }

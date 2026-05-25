@@ -64,7 +64,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(terminalEl);
-    
+
     // load CanvasAddon to prevent DOM Text Selection deadlocks on mobile
     // and improve rendering performance during scroll refits.
     const canvasAddon = new CanvasAddon();
@@ -85,7 +85,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const viewportEl = terminalEl.querySelector('.xterm-viewport');
     viewportEl?.addEventListener('touchstart', bypassXtermTouch, { capture: true });
     viewportEl?.addEventListener('touchmove', bypassXtermTouch, { capture: true });
-    // Note: removed pointerdown/pointermove interception to prevent 
+    // Note: removed pointerdown/pointermove interception to prevent
     // native Pointer Event State Machine deadlocks on some Android devices.
     const safeFit = (): void => {
       try {
@@ -102,7 +102,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     // these are dropped; rows-only changes are debounced (see resizeSub).
     let lastReportedCols = -1;
     let lastReportedRows = -1;
-    
+
     let isUnmounted = false;
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -150,7 +150,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
           return;
         }
         switch (msg.type) {
-          case 'sessions': return;
+          case 'sessions':
+            return;
           case 'ready':
             activeSessionId = msg.sessionId;
             setLabel(msg.summary.name);
@@ -159,9 +160,15 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
               term.write(msg.replay, () => term.scrollToBottom());
             }
             return;
-          case 'pty': term.write(msg.data); return;
-          case 'state': setSessionState(msg.state); return;
-          case 'exit': term.write(`\r\n\x1b[33m[process exited with code ${msg.code}]\x1b[0m\r\n`); return;
+          case 'pty':
+            term.write(msg.data);
+            return;
+          case 'state':
+            setSessionState(msg.state);
+            return;
+          case 'exit':
+            term.write(`\r\n\x1b[33m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+            return;
           case 'error':
             term.write(`\r\n\x1b[31m[error: ${msg.message}]\x1b[0m\r\n`);
             if (msg.message.startsWith('unknown session:')) {
@@ -180,9 +187,9 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
         if (isUnmounted) return;
         setStatus('reconnecting');
         if (opened) term.write('\r\n\x1b[33m[disconnected, reconnecting...]\x1b[0m\r\n');
-        
+
         reconnectAttempts++;
-        const delay = Math.min(10000, 1000 * Math.pow(1.5, reconnectAttempts - 1));
+        const delay = Math.min(10000, 1000 * 1.5 ** (reconnectAttempts - 1));
         reconnectTimer = setTimeout(connectWs, delay);
       };
     };
@@ -225,14 +232,18 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
         flushReport(cols, rows);
         return;
       }
-      
+
       const isNarrow = window.matchMedia('(max-width: 600px)').matches;
       // On mobile, ignore small row changes (e.g. <= 15 rows caused by large address bars hide/show)
       // to prevent PTY resize storms (which causes history to append duplicate dumps).
       // We don't update lastReportedRows here so cumulative small changes are still measured against the last "valid" fit height.
-      if (isNarrow && Math.abs(rows - lastReportedRows) <= 15 && Math.abs(rows - lastReportedRows) > 0) {
-         // Do not trigger flushReport for tiny vertical resizes on mobile
-         return;
+      if (
+        isNarrow &&
+        Math.abs(rows - lastReportedRows) <= 15 &&
+        Math.abs(rows - lastReportedRows) > 0
+      ) {
+        // Do not trigger flushReport for tiny vertical resizes on mobile
+        return;
       }
 
       if (reportTimer !== undefined) clearTimeout(reportTimer);

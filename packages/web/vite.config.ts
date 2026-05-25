@@ -11,5 +11,8 @@ export default defineConfig({
     // dual-stack), making LAN access via 192.168.x.x fail while Tailscale
     // happens to work via IPv6/dual-stack.
     host: '0.0.0.0',
+    proxy: {
+      '/api': 'http://127.0.0.1:8787',
+    },
   },
 });
