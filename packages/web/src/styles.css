@@ -342,6 +342,7 @@ header h1 {
      scroll is "stuck" at the top. */
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  overflow-x: hidden !important;
 }
 
 .xterm-viewport::-webkit-scrollbar {

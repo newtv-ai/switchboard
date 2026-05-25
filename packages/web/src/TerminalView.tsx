@@ -1,3 +1,4 @@
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,7 +63,12 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(containerRef.current);
+    term.open(terminalEl);
+    
+    // load CanvasAddon to prevent DOM Text Selection deadlocks on mobile
+    // and improve rendering performance during scroll refits.
+    const canvasAddon = new CanvasAddon();
+    term.loadAddon(canvasAddon);
 
     // xterm.js's built-in touch handler manually does `scrollTop += deltaY`
     // (1:1 finger-to-pixel, NO momentum) and preventDefaults touchmove in
@@ -79,8 +85,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const viewportEl = terminalEl.querySelector('.xterm-viewport');
     viewportEl?.addEventListener('touchstart', bypassXtermTouch, { capture: true });
     viewportEl?.addEventListener('touchmove', bypassXtermTouch, { capture: true });
-    viewportEl?.addEventListener('pointerdown', bypassXtermTouch, { capture: true });
-    viewportEl?.addEventListener('pointermove', bypassXtermTouch, { capture: true });
+    // Note: removed pointerdown/pointermove interception to prevent 
+    // native Pointer Event State Machine deadlocks on some Android devices.
     const safeFit = (): void => {
       try {
         fit.fit();
@@ -219,6 +225,16 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
         flushReport(cols, rows);
         return;
       }
+      
+      const isNarrow = window.matchMedia('(max-width: 600px)').matches;
+      // On mobile, ignore small row changes (e.g. <= 15 rows caused by large address bars hide/show)
+      // to prevent PTY resize storms (which causes history to append duplicate dumps).
+      // We don't update lastReportedRows here so cumulative small changes are still measured against the last "valid" fit height.
+      if (isNarrow && Math.abs(rows - lastReportedRows) <= 15 && Math.abs(rows - lastReportedRows) > 0) {
+         // Do not trigger flushReport for tiny vertical resizes on mobile
+         return;
+      }
+
       if (reportTimer !== undefined) clearTimeout(reportTimer);
       reportTimer = setTimeout(() => {
         reportTimer = undefined;
@@ -265,8 +281,6 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       vv?.removeEventListener('resize', refit);
       viewportEl?.removeEventListener('touchstart', bypassXtermTouch, { capture: true });
       viewportEl?.removeEventListener('touchmove', bypassXtermTouch, { capture: true });
-      viewportEl?.removeEventListener('pointerdown', bypassXtermTouch, { capture: true });
-      viewportEl?.removeEventListener('pointermove', bypassXtermTouch, { capture: true });
       if (refitTimer !== undefined) clearTimeout(refitTimer);
       if (reportTimer !== undefined) clearTimeout(reportTimer);
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
@@ -280,6 +294,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       }
       wsRef.current = null;
       termRef.current = null;
+      canvasAddon.dispose();
       term.dispose();
     };
     // App.tsx keeps `target` reference-stable until the user navigates back,
