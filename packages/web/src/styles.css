@@ -462,31 +462,66 @@ header h1 {
 }
 
 .filename-cell {
-  position: relative;
   word-break: break-all;
 }
 
+.uploads-panel {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.uploads-panel-title {
+  font-size: 11px;
+  color: #5ad48a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.upload-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.upload-row-name {
+  color: #ddd;
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-row-stats {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .progress-bar {
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
+  position: relative;
+  height: 4px;
   background: #2a2a2a;
   width: 100%;
+  border-radius: 2px;
+  overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
   background: #5ad48a;
-  transition: width 0.2s ease;
-}
-
-.progress-text {
-  position: absolute;
-  right: 0;
-  top: -18px;
-  font-size: 10px;
-  color: #5ad48a;
+  transition: width 0.15s ease;
 }
 
 .btn-small {

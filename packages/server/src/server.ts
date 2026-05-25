@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import * as nodeUrl from 'node:url';
 import fastifyMultipart from '@fastify/multipart';
@@ -69,6 +70,7 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   });
 
   app.post('/api/upload', async (req, reply) => {
+    const t0 = Date.now();
     try {
       const data = await req.file();
       if (!data) {
@@ -83,8 +85,24 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
       const isAppend = req.headers['x-upload-append'] === 'true';
       const flags = isAppend ? 'a' : 'w';
 
-      await pipeline(data.file, fs.createWriteStream(destPath, { flags }));
-      return { success: true, filename: sanitizedFilename };
+      // Count bytes flowing through so we can log throughput per chunk.
+      let bytes = 0;
+      const counter = new Transform({
+        transform(chunk: Buffer, _enc, cb) {
+          bytes += chunk.length;
+          cb(null, chunk);
+        },
+      });
+
+      await pipeline(data.file, counter, fs.createWriteStream(destPath, { flags }));
+
+      const ms = Date.now() - t0;
+      const mbps = ms > 0 ? (bytes / 1024 / 1024 / (ms / 1000)).toFixed(2) : 'inf';
+      req.log.info(
+        `upload: ${sanitizedFilename} append=${isAppend} bytes=${bytes} took=${ms}ms (${mbps} MB/s)`,
+      );
+
+      return { success: true, filename: sanitizedFilename, bytes, durationMs: ms };
     } catch (err) {
       req.log.error(err);
       const message = err instanceof Error ? err.message : 'Internal Server Error';

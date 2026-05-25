@@ -10,12 +10,19 @@ export interface FileManagerProps {
   onClose: () => void;
 }
 
+interface UploadState {
+  percent: number;
+  loaded: number;
+  total: number;
+  speedMBps: number;
+}
+
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
 export function FileManager({ onClose }: FileManagerProps): JSX.Element {
   const [files, setFiles] = useState<ServerFile[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [uploadProgress, setUploadProgress] = useState<Record<string, UploadState>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
@@ -43,9 +50,12 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
     for (const file of Array.from(selectedFiles)) {
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
       let uploadedBytes = 0;
+      const startTime = performance.now();
 
-      // Reset progress
-      setUploadProgress((prev) => ({ ...prev, [file.name]: 0 }));
+      setUploadProgress((prev) => ({
+        ...prev,
+        [file.name]: { percent: 0, loaded: 0, total: file.size, speedMBps: 0 },
+      }));
 
       try {
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
@@ -70,14 +80,23 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
             let errorDetail = '';
             try {
               errorDetail = await res.text();
-            } catch (e) {}
+            } catch (_e) {
+              /* ignore */
+            }
             throw new Error(`HTTP ${res.status}: ${errorDetail}`);
           }
 
           uploadedBytes += chunk.size;
+          const elapsedSec = (performance.now() - startTime) / 1000;
+          const speedMBps = elapsedSec > 0 ? uploadedBytes / 1024 / 1024 / elapsedSec : 0;
           setUploadProgress((prev) => ({
             ...prev,
-            [file.name]: Math.round((uploadedBytes / file.size) * 100),
+            [file.name]: {
+              percent: Math.round((uploadedBytes / file.size) * 100),
+              loaded: uploadedBytes,
+              total: file.size,
+              speedMBps,
+            },
           }));
         }
       } catch (err) {
@@ -93,25 +112,35 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
           e.name === 'NotAllowedError' ||
           e.name === 'NotReadableError' ||
           e.name === 'SecurityError' ||
-          /permission|denied|not\s*allowed|not\s*readable/i.test(e.message ?? '');
+          // On mobile, when the browser cannot read the picked file from its
+          // sandboxed source, the streamed fetch body read fails and surfaces
+          // as a generic "TypeError: Failed to fetch" — there's no more
+          // specific error available. We treat it as a permission case
+          // because that's overwhelmingly the cause on mobile and the
+          // remediation (copy to Downloads) is harmless even if the real
+          // cause was a network drop.
+          /permission|denied|not\s*allowed|not\s*readable|failed\s*to\s*fetch|load\s*failed|network\s*request\s*failed/i.test(
+            e.message ?? '',
+          );
         const hint = isLikelyPermission
-          ? "\n\nThis usually means your phone browser cannot read the file from its current folder (common for files inside chat apps or app-private storage).\nTip: copy the file to your phone's Downloads / Download / 下载 folder, then pick it from there."
+          ? '\n\n📵 手机浏览器无法读取所选文件，通常是因为它在某个 App 的私有目录里（聊天 App 的图片视频、其他 App 的 Documents 等）。\n   解决：先把文件复制到手机的 "下载" / "Download" 文件夹，再从那里选。\n\n📵 Your phone browser cannot read the file from its current folder (common for files inside chat apps or app-private storage).\n   Tip: copy the file to your Downloads / Download folder and pick it from there.'
           : '';
         alert(`Failed to upload ${file.name}\nReason: ${e.message ?? String(err)}${hint}`);
       }
 
-      // Clear progress after short delay
+      // Refresh listing immediately so this file shows up in the table while
+      // we leave the progress row visible at 100% for a moment.
+      fetchFiles();
+
       setTimeout(() => {
         setUploadProgress((prev) => {
           const next = { ...prev };
           delete next[file.name];
           return next;
         });
-      }, 2000);
+      }, 1500);
     }
 
-    // Refresh list
-    fetchFiles();
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -164,6 +193,26 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
             </span>
           </div>
 
+          {Object.keys(uploadProgress).length > 0 && (
+            <div className="uploads-panel">
+              <div className="uploads-panel-title">Uploading…</div>
+              {Object.entries(uploadProgress).map(([name, st]) => (
+                <div key={name} className="upload-row">
+                  <div className="upload-row-head">
+                    <span className="upload-row-name">{name}</span>
+                    <span className="upload-row-stats">
+                      {formatSize(st.loaded)} / {formatSize(st.total)} · {st.speedMBps.toFixed(1)}{' '}
+                      MB/s · {st.percent}%
+                    </span>
+                  </div>
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${st.percent}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="files-list">
             {loading ? (
               <p>Loading files...</p>
@@ -181,18 +230,7 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
                 <tbody>
                   {files.map((f) => (
                     <tr key={f.name}>
-                      <td className="filename-cell">
-                        {f.name}
-                        {uploadProgress[f.name] !== undefined && (
-                          <div className="progress-bar">
-                            <div
-                              className="progress-fill"
-                              style={{ width: `${uploadProgress[f.name]}%` }}
-                            />
-                            <span className="progress-text">{uploadProgress[f.name]}%</span>
-                          </div>
-                        )}
-                      </td>
+                      <td className="filename-cell">{f.name}</td>
                       <td>{formatSize(f.size)}</td>
                       <td>
                         <button
