@@ -47,6 +47,11 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       fontFamily: 'Consolas, "Cascadia Code", "Courier New", monospace',
       fontSize: isNarrow ? 12 : 14,
       letterSpacing: 0,
+      // Default scrollback (1000 lines) silently truncates long pre-TUI
+      // dumps (claude-mem SessionStart hook output etc.) — on phone with
+      // narrow columns those dumps wrap heavily, so 1000 lines is exhausted
+      // before the user can scroll to the top. 10k covers normal sessions.
+      scrollback: 10000,
       theme: {
         background: '#0c0c0c',
         foreground: '#d4d4d4',
@@ -57,6 +62,22 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
+
+    // xterm.js's built-in touch handler manually does `scrollTop += deltaY`
+    // (1:1 finger-to-pixel, NO momentum) and preventDefaults touchmove in
+    // mid-buffer — that kills the browser's native momentum scrolling and
+    // makes phone scrolling feel like dragging-line-by-line. The reason xterm
+    // does this is to forward touch as mouse clicks in mouse-mode TUIs (vim),
+    // which Claude/Codex don't use. Intercept in capture phase before xterm's
+    // bubble-phase listeners fire, stopImmediatePropagation, and let the
+    // browser scroll the .xterm-viewport natively (it's overflow-y:scroll).
+    // xterm's Viewport subscribes to the viewport's native `scroll` event
+    // (Viewport.ts:71), so re-rendering still works — we just get momentum
+    // for free.
+    const bypassXtermTouch = (e: Event): void => e.stopImmediatePropagation();
+    const terminalEl = containerRef.current;
+    terminalEl.addEventListener('touchstart', bypassXtermTouch, { capture: true });
+    terminalEl.addEventListener('touchmove', bypassXtermTouch, { capture: true });
     const safeFit = (): void => {
       try {
         fit.fit();
@@ -71,6 +92,10 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const ws = new WebSocket(`${WS_BASE}/ws`);
     wsRef.current = ws;
     let opened = false;
+    // Last cols/rows reported to server. Resize events that don't change
+    // these are dropped; rows-only changes are debounced (see resizeSub).
+    let lastReportedCols = -1;
+    let lastReportedRows = -1;
 
     const sendWs = (msg: ClientMessage): void => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -94,6 +119,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
           rows: term.rows,
         });
       }
+      lastReportedCols = term.cols;
+      lastReportedRows = term.rows;
     };
 
     ws.onmessage = (e: MessageEvent<string>) => {
@@ -148,33 +175,82 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       // than the viewport, scrolling on every keystroke yanks the user out
       // of whatever they were looking at.
     });
-    const resizeSub = term.onResize(({ cols, rows }) => sendWs({ type: 'resize', cols, rows }));
+    // Resize reporting is layered: cols changes propagate immediately (real
+    // reorientation — user expects the TUI to adapt), but rows-only changes
+    // are debounced 500ms. Two sources of rows-only churn on phone:
+    //   - mobile address-bar collapse during scroll (transient, NOT a real
+    //     intent — user gains 5 rows for ~200ms while scrolling, then either
+    //     keeps scrolling or stops)
+    //   - IME keyboard show/hide (real, but settles in ~300ms)
+    // Each unsuppressed report → server refit → pty.resize() → SIGWINCH →
+    // Claude redraws the visible conversation tail. Because claude's TUI is
+    // main-screen (not alt-screen) for history, every redraw APPENDS another
+    // copy of the conversation to scrollback. Without debounce, scrolling
+    // accumulates a duplicate per fit. The 500ms window absorbs scroll-driven
+    // address-bar churn entirely and adds tolerable latency to keyboard pop.
+    let reportTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushReport = (cols: number, rows: number): void => {
+      lastReportedCols = cols;
+      lastReportedRows = rows;
+      sendWs({ type: 'resize', cols, rows });
+    };
+    const resizeSub = term.onResize(({ cols, rows }) => {
+      if (cols === lastReportedCols && rows === lastReportedRows) return;
+      if (cols !== lastReportedCols) {
+        if (reportTimer !== undefined) {
+          clearTimeout(reportTimer);
+          reportTimer = undefined;
+        }
+        flushReport(cols, rows);
+        return;
+      }
+      if (reportTimer !== undefined) clearTimeout(reportTimer);
+      reportTimer = setTimeout(() => {
+        reportTimer = undefined;
+        flushReport(cols, rows);
+      }, 500);
+    });
 
+    // Refit is debounced so a burst of size-change events collapses to one
+    // fit AFTER layout settles. Without this, mobile scroll → address bar
+    // collapse fires visualViewport.scroll + ResizeObserver (height tracks
+    // vv via --app-h in main.tsx) repeatedly during one finger swipe → each
+    // fit changes xterm rows → resize sent to server → MIN-policy refit →
+    // pty.resize() → SIGWINCH → TUI redraw → bytes pile up in the replay
+    // ring buffer (visible to the user as the SAME TUI frame stacked N
+    // times in scrollback). Debounce kills the storm at the source.
+    //
+    // Earlier this also subscribed to visualViewport.scroll and touchend
+    // directly, citing MIUI / Android Chrome being slow to propagate
+    // address-bar-collapse through ResizeObserver. The cost-benefit flipped
+    // once we noticed those handlers were the primary driver of the refit
+    // storm — main.tsx already drives --app-h from vv.scroll, and CSS height
+    // → ResizeObserver eventually fires. A 150ms trailing debounce trades a
+    // brief layout lag during scroll for stable PTY/scrollback behaviour.
+    let refitTimer: ReturnType<typeof setTimeout> | undefined;
     let rafId = 0;
     const refit = (): void => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(safeFit);
+      if (refitTimer !== undefined) clearTimeout(refitTimer);
+      refitTimer = setTimeout(() => {
+        refitTimer = undefined;
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(safeFit);
+      }, 150);
     };
 
     const ro = new ResizeObserver(refit);
     ro.observe(containerRef.current);
 
-    // MIUI / Android Chrome do not always relay address-bar-collapse height
-    // changes to the container's ResizeObserver fast enough, leaving xterm at
-    // an old small row count with empty black space below the content. Subscribe
-    // directly to visualViewport AND touchend so we refit the moment the
-    // visible viewport (or any user gesture) hints that layout changed.
     const vv = window.visualViewport;
     vv?.addEventListener('resize', refit);
-    vv?.addEventListener('scroll', refit);
-    const onTouchEnd = (): void => refit();
-    containerRef.current.addEventListener('touchend', onTouchEnd, { passive: true });
 
     return () => {
       ro.disconnect();
       vv?.removeEventListener('resize', refit);
-      vv?.removeEventListener('scroll', refit);
-      containerRef.current?.removeEventListener('touchend', onTouchEnd);
+      terminalEl?.removeEventListener('touchstart', bypassXtermTouch, { capture: true });
+      terminalEl?.removeEventListener('touchmove', bypassXtermTouch, { capture: true });
+      if (refitTimer !== undefined) clearTimeout(refitTimer);
+      if (reportTimer !== undefined) clearTimeout(reportTimer);
       cancelAnimationFrame(rafId);
       dataSub.dispose();
       resizeSub.dispose();

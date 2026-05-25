@@ -334,6 +334,13 @@ header h1 {
 
 .xterm-viewport {
   scrollbar-width: none;
+  /* TerminalView.tsx bypasses xterm.js's manual touch handler so the browser
+     can scroll this element natively with momentum. `overscroll-behavior:
+     contain` keeps overscroll at the buffer edges from triggering pull-to-
+     refresh / page navigation gestures, which would otherwise feel like the
+     scroll is "stuck" at the top. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .xterm-viewport::-webkit-scrollbar {
