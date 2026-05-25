@@ -18,6 +18,7 @@
 - **Truly self-hosted** — bytes stay on your LAN or Tailscale. No cloud relay, no account, no key escrow.
 - **Wraps your existing terminal** — keep your normal `claude` / `codex` workflow on the desktop; the phone *attaches* to that live session instead of spawning a parallel one.
 - **Phone never logs into the AI vendor — no ban risk** — Switchboard only relays terminal I/O between your dev box and your phone; the phone never authenticates to (or directly connects to) Anthropic / OpenAI / Google. Every API call still originates from your dev box under your normal identity, so the vendor sees the same desktop client you've always used — nothing to flag as "anomalous mobile / multi-device login."
+- **Phone ↔ dev-box file transfer** — drop files from your phone straight into a folder on the dev box (and download them back) via the in-app file manager. Great for moving a screenshot, an APK to test, or a one-off text snippet without spinning up a cloud bucket.
 
 [5-minute Quickstart →](#install) · [Architecture in 30s](#architecture-in-30-seconds) · [Full SPEC](./SPEC.md)
 
@@ -31,6 +32,7 @@
 - [Install](#install)
 - [Run](#run)
 - [Phone access (LAN / Tailscale)](#phone-access-lan--tailscale)
+- [File transfer (phone ↔ dev box)](#file-transfer-phone--dev-box)
 - [Firewall — opening the port](#firewall--opening-the-port)
 - [Supported agents](#supported-agents)
 - [FAQ](#faq)
@@ -56,6 +58,8 @@ A typical session:
 ```
 
 The wrapper spawns the CLI in a real PTY, mirrors output to **both** your local terminal and any connected phone/desktop browser, and forwards input either direction. Closing the phone browser doesn't kill the session; your desktop terminal keeps working.
+
+**Or start cold from the phone** — if nothing is wrapped yet, tap **+ New passthrough session** in the web UI to spawn a fresh shell on the dev box, then launch `claude` / `codex` / anything in it. No SSH client on the phone, no need to wake the desktop.
 
 ## Architecture in 30 seconds
 
@@ -110,6 +114,8 @@ npm run dev
 # Server on http://0.0.0.0:8787, web on http://0.0.0.0:5173
 ```
 
+> **One-click launch**: the repo ships a `start.bat` (Windows, double-click) and `start.sh` (Linux / macOS, `bash start.sh`) at the project root. They free up ports `5173` / `8787` from any prior dev process and then run `npm run dev`. Equivalent to Terminal A above — Terminal B (`sw run …`) is still separate.
+
 ```bash
 # Terminal B — wrap an AI CLI so phones can attach to it
 sw run claude              # Anthropic's Claude Code
@@ -140,6 +146,34 @@ npm run build -w @switchboard/web
 ### Anywhere (Tailscale)
 
 Install [Tailscale](https://tailscale.com) on both the dev box and the phone, log in to the same tailnet, and use the dev box's Tailscale IP (`100.x.y.z`) in place of the LAN IP. No firewall changes needed; Tailscale handles NAT traversal.
+
+## File transfer (phone ↔ dev box)
+
+Open the web UI and click **Upload** in the header — this opens a small file manager that lets you:
+
+- **Phone → dev box**: pick one or more files and upload them. Files land in `<repo-root>/downloads/` on the dev box. Uploads are streamed in 5 MB chunks so multi-GB files work without holding the whole file in memory.
+- **Dev box → phone**: click **Download** next to any file in the list; the browser saves it through its normal download flow.
+
+This is intentionally a single shared folder per dev box, with no auth — same trust model as the rest of Switchboard (bind to LAN / Tailscale only).
+
+### Mobile upload fails? It's almost always a permission issue, not a bug
+
+On phones, the browser is sandboxed and **can't always read the file you selected** — most notably:
+
+- Media stored inside chat apps (WhatsApp / WeChat / Telegram / QQ folders).
+- Files in app-private storage (Documents folder of another app, etc.).
+- Some vendor "Files" apps return a file URI the browser can't open.
+
+The fix is the same in every case: **copy the file to your phone's public Downloads folder first**, then re-select it from there.
+
+The folder is called slightly different things depending on phone and language — they're the same place:
+
+| Phone                  | Folder name (English)   | Chinese system |
+| ---                    | ---                     | ---            |
+| Android (most)         | `Download` or `Downloads` | `下载`         |
+| iOS Files app          | `Downloads`             | `下载`         |
+
+The Switchboard upload dialog will surface this hint automatically when an upload error looks permission-related.
 
 ## Firewall — opening the port
 
@@ -275,6 +309,9 @@ switchboard/
 ├── scripts/
 │   ├── install.sh   # Linux & macOS installer
 │   └── install.ps1  # Windows installer
+├── start.sh         # one-click dev launcher (Linux / macOS)
+├── start.bat        # one-click dev launcher (Windows)
+├── downloads/       # phone↔dev-box file-transfer drop folder (gitignored)
 ├── SPEC.md          # full design + roadmap; source of truth for architectural decisions
 └── README.md        # this file
 ```
