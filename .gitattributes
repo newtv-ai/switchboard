@@ -1,0 +1,23 @@
+# Force all text files to LF on checkout, regardless of platform
+# (overrides Windows' core.autocrlf=true default which would corrupt biome's
+# lineEnding: "lf" enforcement on every git restore / fresh clone).
+* text=auto eol=lf
+
+# Explicitly mark known binary types so git never tries to normalize them.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.tgz    binary
+*.bin    binary
+*.docx   binary
+*.xlsx   binary
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary

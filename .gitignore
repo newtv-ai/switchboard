@@ -47,3 +47,7 @@ downloads/
 # Misc
 提示.txt
 .claude/
+
+# Local diagnostics / scratch (buffer dumps, bug analysis docs from Gemini etc.)
+buffer-dump.bin
+bug分析.*
