@@ -48,6 +48,8 @@ downloads/
 提示.txt
 .claude/
 
-# Local diagnostics / scratch (buffer dumps, bug analysis docs from Gemini etc.)
+# Local diagnostics / scratch / personal notes. Anything in docs/ stays
+# local-only by convention (bug analyses, investigation logs, raw buffer dumps).
 buffer-dump.bin
 bug分析.*
+docs/
