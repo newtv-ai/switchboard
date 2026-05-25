@@ -58,6 +58,7 @@ header h1 {
 }
 
 .status-connecting,
+.status-reconnecting,
 .state-starting,
 .state-thinking {
   background: #3a3a1a;

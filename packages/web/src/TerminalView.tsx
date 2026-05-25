@@ -15,7 +15,7 @@ export interface TerminalViewProps {
   onBack(): void;
 }
 
-type ConnStatus = 'connecting' | 'open' | 'closed' | 'error';
+type ConnStatus = 'connecting' | 'open' | 'closed' | 'error' | 'reconnecting';
 
 export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,7 +39,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
   }, []);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const terminalEl = containerRef.current;
+    if (!terminalEl) return;
 
     const isNarrow = window.matchMedia('(max-width: 600px)').matches;
     const term = new Terminal({
@@ -75,9 +76,11 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     // (Viewport.ts:71), so re-rendering still works — we just get momentum
     // for free.
     const bypassXtermTouch = (e: Event): void => e.stopImmediatePropagation();
-    const terminalEl = containerRef.current;
-    terminalEl.addEventListener('touchstart', bypassXtermTouch, { capture: true });
-    terminalEl.addEventListener('touchmove', bypassXtermTouch, { capture: true });
+    const viewportEl = terminalEl.querySelector('.xterm-viewport');
+    viewportEl?.addEventListener('touchstart', bypassXtermTouch, { capture: true });
+    viewportEl?.addEventListener('touchmove', bypassXtermTouch, { capture: true });
+    viewportEl?.addEventListener('pointerdown', bypassXtermTouch, { capture: true });
+    viewportEl?.addEventListener('pointermove', bypassXtermTouch, { capture: true });
     const safeFit = (): void => {
       try {
         fit.fit();
@@ -89,84 +92,96 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
 
     termRef.current = term;
 
-    const ws = new WebSocket(`${WS_BASE}/ws`);
-    wsRef.current = ws;
-    let opened = false;
     // Last cols/rows reported to server. Resize events that don't change
     // these are dropped; rows-only changes are debounced (see resizeSub).
     let lastReportedCols = -1;
     let lastReportedRows = -1;
+    
+    let isUnmounted = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let activeSessionId = target.kind === 'attach' ? target.sessionId : undefined;
 
     const sendWs = (msg: ClientMessage): void => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
     };
 
-    ws.onopen = () => {
-      opened = true;
-      setStatus('open');
-      if (target.kind === 'attach') {
-        sendWs({
-          type: 'attach',
-          sessionId: target.sessionId,
-          cols: term.cols,
-          rows: term.rows,
-        });
-      } else {
-        sendWs({
-          type: 'create',
-          adapterId: target.adapterId,
-          cols: term.cols,
-          rows: term.rows,
-        });
-      }
-      lastReportedCols = term.cols;
-      lastReportedRows = term.rows;
+    const connectWs = () => {
+      if (isUnmounted) return;
+      const ws = new WebSocket(`${WS_BASE}/ws`);
+      wsRef.current = ws;
+      let opened = false;
+
+      ws.onopen = () => {
+        opened = true;
+        reconnectAttempts = 0;
+        setStatus('open');
+        if (activeSessionId) {
+          sendWs({
+            type: 'attach',
+            sessionId: activeSessionId,
+            cols: term.cols,
+            rows: term.rows,
+          });
+        } else if (target.kind === 'create') {
+          sendWs({
+            type: 'create',
+            adapterId: target.adapterId,
+            cols: term.cols,
+            rows: term.rows,
+          });
+        }
+        lastReportedCols = term.cols;
+        lastReportedRows = term.rows;
+      };
+
+      ws.onmessage = (e: MessageEvent<string>) => {
+        let msg: ServerMessage;
+        try {
+          msg = JSON.parse(e.data) as ServerMessage;
+        } catch {
+          return;
+        }
+        switch (msg.type) {
+          case 'sessions': return;
+          case 'ready':
+            activeSessionId = msg.sessionId;
+            setLabel(msg.summary.name);
+            setSessionState(msg.summary.state);
+            if (msg.replay) {
+              term.write(msg.replay, () => term.scrollToBottom());
+            }
+            return;
+          case 'pty': term.write(msg.data); return;
+          case 'state': setSessionState(msg.state); return;
+          case 'exit': term.write(`\r\n\x1b[33m[process exited with code ${msg.code}]\x1b[0m\r\n`); return;
+          case 'error':
+            term.write(`\r\n\x1b[31m[error: ${msg.message}]\x1b[0m\r\n`);
+            if (msg.message.startsWith('unknown session:')) {
+              setTimeout(onBack, 1500);
+            }
+            return;
+        }
+      };
+
+      ws.onerror = () => {
+        if (!opened) setStatus('error');
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (isUnmounted) return;
+        setStatus('reconnecting');
+        if (opened) term.write('\r\n\x1b[33m[disconnected, reconnecting...]\x1b[0m\r\n');
+        
+        reconnectAttempts++;
+        const delay = Math.min(10000, 1000 * Math.pow(1.5, reconnectAttempts - 1));
+        reconnectTimer = setTimeout(connectWs, delay);
+      };
     };
 
-    ws.onmessage = (e: MessageEvent<string>) => {
-      let msg: ServerMessage;
-      try {
-        msg = JSON.parse(e.data) as ServerMessage;
-      } catch {
-        return;
-      }
-      switch (msg.type) {
-        case 'sessions':
-          // Initial list push on connect — ignore in terminal view.
-          return;
-        case 'ready':
-          setLabel(msg.summary.name);
-          setSessionState(msg.summary.state);
-          if (msg.replay) {
-            term.write(msg.replay, () => term.scrollToBottom());
-          }
-          return;
-        case 'pty':
-          term.write(msg.data);
-          return;
-        case 'state':
-          setSessionState(msg.state);
-          return;
-        case 'exit':
-          term.write(`\r\n\x1b[33m[process exited with code ${msg.code}]\x1b[0m\r\n`);
-          return;
-        case 'error':
-          term.write(`\r\n\x1b[31m[error: ${msg.message}]\x1b[0m\r\n`);
-          // Session is gone (wrapper exited or server restarted) and our
-          // sessionStorage points at a dead id — bounce back to the list so
-          // the user picks a live session instead of staring at the error.
-          if (msg.message.startsWith('unknown session:')) {
-            setTimeout(onBack, 1500);
-          }
-          return;
-      }
-    };
-
-    ws.onerror = () => setStatus('error');
-    ws.onclose = () => {
-      setStatus('closed');
-      if (opened) term.write('\r\n\x1b[33m[disconnected]\x1b[0m\r\n');
-    };
+    connectWs();
 
     const dataSub = term.onData((data) => {
       sendWs({ type: 'input', data });
@@ -245,17 +260,21 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     vv?.addEventListener('resize', refit);
 
     return () => {
+      isUnmounted = true;
       ro.disconnect();
       vv?.removeEventListener('resize', refit);
-      terminalEl?.removeEventListener('touchstart', bypassXtermTouch, { capture: true });
-      terminalEl?.removeEventListener('touchmove', bypassXtermTouch, { capture: true });
+      viewportEl?.removeEventListener('touchstart', bypassXtermTouch, { capture: true });
+      viewportEl?.removeEventListener('touchmove', bypassXtermTouch, { capture: true });
+      viewportEl?.removeEventListener('pointerdown', bypassXtermTouch, { capture: true });
+      viewportEl?.removeEventListener('pointermove', bypassXtermTouch, { capture: true });
       if (refitTimer !== undefined) clearTimeout(refitTimer);
       if (reportTimer !== undefined) clearTimeout(reportTimer);
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       cancelAnimationFrame(rafId);
       dataSub.dispose();
       resizeSub.dispose();
       try {
-        ws.close();
+        wsRef.current?.close();
       } catch {
         // ignore
       }

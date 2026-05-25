@@ -144,17 +144,25 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     }
   });
 
-  socket.on('close', (code: number, reason: Buffer) => {
+  const cleanupConnection = (reasonPrefix: string, detail?: string) => {
     clearInterval(keepalive);
     if (process.env.SWITCHBOARD_DEBUG) {
       // eslint-disable-next-line no-console
       console.log(
-        `[switchboard:debug] /ws close code=${code} reason=${reason?.toString('utf8') || '(none)'} hasHandle=${Boolean(handle)} hasSession=${Boolean(session)}`,
+        `[switchboard:debug] /ws ${reasonPrefix} ${detail || '(none)'} hasHandle=${Boolean(handle)} hasSession=${Boolean(session)}`,
       );
     }
     handle?.detach();
     handle = undefined;
     session = undefined;
+  };
+
+  socket.on('close', (code: number, reason: Buffer) => {
+    cleanupConnection('close', `code=${code} reason=${reason?.toString('utf8')}`);
     // The session itself stays alive; another client can re-attach by id.
+  });
+
+  socket.on('error', (err: Error) => {
+    cleanupConnection('error', err.message);
   });
 }
