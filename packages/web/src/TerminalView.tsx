@@ -157,6 +157,12 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
             setLabel(msg.summary.name);
             setSessionState(msg.summary.state);
             if (msg.replay) {
+              // Wipe xterm before replaying. 'ready' fires on EVERY (re)attach,
+              // including auto-reconnect after a transient WS drop. The server's
+              // replay buffer is the full source of truth for what should be on
+              // screen — writing it on top of whatever xterm already contains
+              // is what makes "刷新越多重复越多" happen.
+              term.reset();
               term.write(msg.replay, () => term.scrollToBottom());
             }
             return;

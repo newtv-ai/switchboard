@@ -150,6 +150,31 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
     window.open(`/api/download/${encodeURIComponent(filename)}`, '_blank');
   };
 
+  const handleDelete = async (filename: string) => {
+    // eslint-disable-next-line no-alert -- confirm() is the simplest UX here; modal dialog would be overkill.
+    if (!window.confirm(`Delete "${filename}"? / 确认删除 "${filename}" 吗？`)) return;
+    try {
+      const res = await fetch(`/api/files/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        let detail = '';
+        try {
+          detail = await res.text();
+        } catch (_e) {
+          /* ignore */
+        }
+        throw new Error(`HTTP ${res.status}: ${detail}`);
+      }
+      // Optimistically remove from local state, then refresh.
+      setFiles((prev) => prev.filter((f) => f.name !== filename));
+      fetchFiles();
+    } catch (err) {
+      const e = err as { message?: string };
+      alert(`Failed to delete ${filename}\nReason: ${e.message ?? String(err)}`);
+    }
+  };
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -233,13 +258,23 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
                       <td className="filename-cell">{f.name}</td>
                       <td>{formatSize(f.size)}</td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          onClick={() => handleDownload(f.name)}
-                        >
-                          📥 Download
-                        </button>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => handleDownload(f.name)}
+                          >
+                            📥 Download
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small btn-danger"
+                            onClick={() => handleDelete(f.name)}
+                            title="Delete file"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

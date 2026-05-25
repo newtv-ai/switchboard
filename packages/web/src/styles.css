@@ -529,6 +529,23 @@ header h1 {
   font-size: 11px;
 }
 
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-danger {
+  background: #5a2424;
+  color: #ffb4b4;
+  border: 1px solid #7a3030;
+}
+
+.btn-danger:hover {
+  background: #7a2c2c;
+  color: #fff;
+}
+
 .btn-files {
   font-size: 14px;
   padding: 4px 10px;

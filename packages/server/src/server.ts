@@ -122,6 +122,30 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
     return result;
   });
 
+  app.delete('/api/files/:name', async (req, reply) => {
+    const raw = (req.params as { name: string }).name;
+    // path.basename strips any '..'/path separators a client tries to sneak in.
+    const safe = path.basename(raw);
+    if (!safe || safe === '.' || safe === '..') {
+      return reply.code(400).send({ error: 'Invalid filename' });
+    }
+    const target = path.join(downloadsDir, safe);
+    try {
+      const stat = fs.statSync(target);
+      if (!stat.isFile()) return reply.code(400).send({ error: 'Not a file' });
+      fs.unlinkSync(target);
+      req.log.info(`delete: ${safe} bytes=${stat.size}`);
+      return { success: true, filename: safe };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return reply.code(404).send({ error: 'File not found' });
+      }
+      req.log.error(err);
+      const message = err instanceof Error ? err.message : 'Internal Server Error';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
   app.get('/health', async () => ({ ok: true, sessions: sessions.list().length }));
 
   app.get('/adapters', async () => sessions.listAdapters());
