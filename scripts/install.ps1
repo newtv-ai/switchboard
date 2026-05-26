@@ -1,4 +1,4 @@
-# Switchboard one-shot installer for Windows (PowerShell 5.1+ / PowerShell 7).
+﻿# Switchboard one-shot installer for Windows (PowerShell 5.1+ / PowerShell 7).
 #
 # Usage:
 #   .\scripts\install.ps1                # install, build, link `sw` globally
