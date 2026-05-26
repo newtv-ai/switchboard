@@ -65,4 +65,5 @@ export type ServerMessage =
   | { type: 'state'; state: AgentState }
   | { type: 'exit'; code: number; signal?: number }
   | { type: 'error'; message: string }
+  | { type: 'pty-resize'; cols: number; rows: number }
   | { type: 'ping' };

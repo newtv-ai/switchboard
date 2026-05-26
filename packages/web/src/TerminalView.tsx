@@ -70,21 +70,60 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     const canvasAddon = new CanvasAddon();
     term.loadAddon(canvasAddon);
 
-    // xterm.js's built-in touch handler manually does `scrollTop += deltaY`
-    // (1:1 finger-to-pixel, NO momentum) and preventDefaults touchmove in
-    // mid-buffer — that kills the browser's native momentum scrolling and
-    // makes phone scrolling feel like dragging-line-by-line. The reason xterm
-    // does this is to forward touch as mouse clicks in mouse-mode TUIs (vim),
-    // which Claude/Codex don't use. Intercept in capture phase before xterm's
-    // bubble-phase listeners fire, stopImmediatePropagation, and let the
-    // browser scroll the .xterm-viewport natively (it's overflow-y:scroll).
-    // xterm's Viewport subscribes to the viewport's native `scroll` event
-    // (Viewport.ts:71), so re-rendering still works — we just get momentum
-    // for free.
-    const bypassXtermTouch = (e: Event): void => e.stopImmediatePropagation();
-    const viewportEl = terminalEl.querySelector('.xterm-viewport');
-    viewportEl?.addEventListener('touchstart', bypassXtermTouch, { capture: true });
-    viewportEl?.addEventListener('touchmove', bypassXtermTouch, { capture: true });
+    // ─── Dual-mode touch handling ───────────────────────────────────────
+    // Alt-screen (fullscreen TUI): translate swipe → PgUp/PgDn sequences
+    // Main-screen (default): bypass xterm's manual touch, let browser scroll
+    const viewportEl = terminalEl.querySelector('.xterm-viewport') as HTMLElement | null;
+    let touchStartY = 0;
+    let touchAccum = 0;
+
+    const handleTouchStart = (e: Event): void => {
+      e.stopImmediatePropagation();
+      if (term.buffer.active.type === 'alternate') {
+        e.preventDefault();
+        touchStartY = (e as TouchEvent).touches[0].clientY;
+        touchAccum = 0;
+      }
+    };
+    const handleTouchMove = (e: Event): void => {
+      e.stopImmediatePropagation();
+      if (term.buffer.active.type === 'alternate') {
+        e.preventDefault();
+        const te = e as TouchEvent;
+        const deltaY = touchStartY - te.touches[0].clientY;
+        touchStartY = te.touches[0].clientY;
+        touchAccum += deltaY;
+        const threshold = 30;
+        while (Math.abs(touchAccum) >= threshold) {
+          if (touchAccum > 0) {
+            sendWs({ type: 'input', data: '\x1b[5~' }); // PgUp
+            touchAccum -= threshold;
+          } else {
+            sendWs({ type: 'input', data: '\x1b[6~' }); // PgDn
+            touchAccum += threshold;
+          }
+        }
+      }
+    };
+    viewportEl?.addEventListener('touchstart', handleTouchStart, { capture: true, passive: false });
+    viewportEl?.addEventListener('touchmove', handleTouchMove, { capture: true, passive: false });
+
+    // ─── Dual-mode wheel handling ────────────────────────────────────────
+    // Alt-screen: translate wheel → arrow keys (Claude fullscreen doesn't
+    //   handle browser wheel natively through xterm.js)
+    // Main-screen with scrollback: let xterm native scroll handle it
+    // Main-screen without scrollback: translate wheel → arrow keys
+    const handleWheel = (e: WheelEvent): void => {
+      const isAlt = term.buffer.active.type === 'alternate';
+      const canScroll = viewportEl ? viewportEl.scrollHeight > viewportEl.clientHeight + 1 : false;
+      if (isAlt || !canScroll) {
+        e.preventDefault();
+        const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 40));
+        const seq = e.deltaY < 0 ? '\x1b[A' : '\x1b[B';
+        sendWs({ type: 'input', data: seq.repeat(lines) });
+      }
+    };
+    terminalEl.addEventListener('wheel', handleWheel, { passive: false });
     // Note: removed pointerdown/pointermove interception to prevent
     // native Pointer Event State Machine deadlocks on some Android devices.
     const safeFit = (): void => {
@@ -166,9 +205,21 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
               term.write(msg.replay, () => term.scrollToBottom());
             }
             return;
-          case 'pty':
-            term.write(msg.data);
+          case 'pty': {
+            const narrow = window.matchMedia('(max-width: 600px)').matches;
+            if (narrow) {
+              term.write(msg.data, () => term.scrollToBottom());
+            } else {
+              const vp = terminalEl.querySelector('.xterm-viewport');
+              const wasAtBottom = vp
+                ? vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 5
+                : true;
+              term.write(msg.data, () => {
+                if (wasAtBottom) term.scrollToBottom();
+              });
+            }
             return;
+          }
           case 'state':
             setSessionState(msg.state);
             return;
@@ -180,6 +231,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
             if (msg.message.startsWith('unknown session:')) {
               setTimeout(onBack, 1500);
             }
+            return;
+          case 'pty-resize':
             return;
         }
       };
@@ -204,10 +257,6 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
 
     const dataSub = term.onData((data) => {
       sendWs({ type: 'input', data });
-      // DO NOT scrollToBottom here. If the buffer (esp. main-screen from
-      // pre-TUI hook output like claude-mem's SessionStart dump) is longer
-      // than the viewport, scrolling on every keystroke yanks the user out
-      // of whatever they were looking at.
     });
     // Resize reporting is layered: cols changes propagate immediately (real
     // reorientation — user expects the TUI to adapt), but rows-only changes
@@ -296,8 +345,9 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       isUnmounted = true;
       ro.disconnect();
       vv?.removeEventListener('resize', refit);
-      viewportEl?.removeEventListener('touchstart', bypassXtermTouch, { capture: true });
-      viewportEl?.removeEventListener('touchmove', bypassXtermTouch, { capture: true });
+      viewportEl?.removeEventListener('touchstart', handleTouchStart, { capture: true });
+      viewportEl?.removeEventListener('touchmove', handleTouchMove, { capture: true });
+      terminalEl.removeEventListener('wheel', handleWheel);
       if (refitTimer !== undefined) clearTimeout(refitTimer);
       if (reportTimer !== undefined) clearTimeout(reportTimer);
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);

@@ -1,3 +1,4 @@
+import { parse as parsePath } from 'node:path';
 import type { WebSocket } from '@fastify/websocket';
 import { type Session, type SessionManager, WrapperBackend } from '@switchboard/core';
 import type { WrapClientMessage, WrapServerMessage } from './protocol.js';
@@ -56,6 +57,7 @@ export function bindWrap(socket: WebSocket, sessions: SessionManager): void {
           cwd: msg.cwd,
           backend,
           name: msg.name,
+          commandName: parsePath(msg.command).name,
         });
         send({ type: 'registered', sessionId: session.id });
       } catch (err) {

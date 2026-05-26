@@ -41,6 +41,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
         onEvent: (event) => send({ type: 'event', event }),
         onState: (state) => send({ type: 'state', state }),
         onExit: (code, signal) => send({ type: 'exit', code, signal }),
+        onResize: (cols, rows) => send({ type: 'pty-resize', cols, rows }),
       },
       initialSize,
     );

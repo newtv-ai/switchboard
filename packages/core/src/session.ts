@@ -20,6 +20,8 @@ export interface CreateSessionOpts {
   backend: SessionBackend;
   source: SessionSource;
   name?: string;
+  /** Original command basename (e.g. 'claude', 'codex') for adapter-specific behaviour. */
+  commandName?: string;
   enableParser?: boolean;
   bufferSize?: number;
 }
@@ -29,6 +31,8 @@ export interface SessionListener {
   onEvent?(event: AgentEvent): void;
   onState?(state: AgentState): void;
   onExit?(code: number, signal?: number): void;
+  /** Called after the PTY is resized (refit negotiation result). */
+  onResize?(cols: number, rows: number): void;
 }
 
 export interface ClientHandle {
@@ -64,6 +68,7 @@ export class Session implements SessionHandle {
   readonly adapter: AgentAdapter;
   readonly cwd: string;
   readonly source: SessionSource;
+  readonly commandName?: string;
   readonly createdAt: Date;
 
   private readonly backend: SessionBackend;
@@ -79,6 +84,7 @@ export class Session implements SessionHandle {
     this.adapter = opts.adapter;
     this.cwd = opts.cwd;
     this.source = opts.source;
+    this.commandName = opts.commandName;
     this.name = opts.name ?? `${opts.adapter.manifest.id}@${basename(opts.cwd) || 'root'}`;
     this.createdAt = new Date();
     this._lastActivityAt = this.createdAt;
@@ -173,6 +179,11 @@ export class Session implements SessionHandle {
     };
   }
 
+  /** Number of browser/phone clients currently attached (excludes backend). */
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
   // ─── Control ─────────────────────────────────────────────────────────────
 
   kill(signal?: string): void {
@@ -238,15 +249,20 @@ export class Session implements SessionHandle {
       if (c.size.cols < minCols) minCols = c.size.cols;
       if (c.size.rows < minRows) minRows = c.size.rows;
     }
-    // Include the backend's own viewport (wrapper's local terminal) — when only
-    // the wrapper is "attached" (no browser clients), PTY size = wrapper's
-    // terminal size. When a phone attaches and reports a smaller size, MIN
-    // shrinks. When the phone closes its tab, MIN restores to the wrapper's.
+    // Backend's own viewport (wrapper's local terminal):
+    //   - COLS: always participates in MIN — wider-than-xterm content scrambles
+    //   - ROWS: only used as FALLBACK when no browser client has reported size.
+    //     The desktop terminal scrolls natively so taller output is harmless,
+    //     but clamping rows to the desktop's small viewport wastes the bottom
+    //     of every mobile screen.
     const ownSize = this.backend.getOwnSize?.();
     if (ownSize) {
-      count++;
       if (ownSize.cols < minCols) minCols = ownSize.cols;
-      if (ownSize.rows < minRows) minRows = ownSize.rows;
+      if (count === 0) {
+        // No browser client — use wrapper's rows as fallback
+        if (ownSize.rows < minRows) minRows = ownSize.rows;
+      }
+      count++;
     }
     if (count > 0 && Number.isFinite(minCols) && Number.isFinite(minRows)) {
       if (process.env.SWITCHBOARD_DEBUG) {
@@ -256,6 +272,7 @@ export class Session implements SessionHandle {
         );
       }
       this.backend.resize(minCols, minRows);
+      for (const c of this.clients.values()) c.listener.onResize?.(minCols, minRows);
     }
   }
 

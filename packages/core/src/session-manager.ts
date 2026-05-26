@@ -17,6 +17,8 @@ export interface RegisterOpts {
   cwd: string;
   backend: SessionBackend;
   name?: string;
+  /** Original command basename (e.g. 'claude') for adapter-specific behaviour. */
+  commandName?: string;
   /** Wrapped sessions skip the parser by default — TUI output isn't structured. */
   enableParser?: boolean;
 }
@@ -80,6 +82,7 @@ export class SessionManager {
         backend: opts.backend,
         source: 'wrapped',
         name: opts.name,
+        commandName: opts.commandName,
         // Wrapped sessions are raw TUI by default — running an NDJSON parser
         // on ANSI byte streams would emit nothing and waste cycles.
         enableParser: opts.enableParser ?? false,
