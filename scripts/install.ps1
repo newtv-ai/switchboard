@@ -120,7 +120,7 @@ if ($OpenFirewall) {
     Write-Warn2 "Port 5173 rule may already exist or could not be added: $($_.Exception.Message)"
   }
   Write-Warn2 'If your Wi-Fi is classified "Public", the rules above will not apply.'
-  Write-Warn2 'Switch the network profile to Private in Settings → Network → Properties.'
+  Write-Warn2 'Switch the network profile to Private in Settings -> Network -> Properties.'
 }
 
 Write-Host ''
