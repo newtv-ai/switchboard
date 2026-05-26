@@ -61,12 +61,12 @@ if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue) -and
 }
 
 # --- 2. Install deps --------------------------------------------------------
-Write-Step 'Installing npm dependencies…'
+Write-Step 'Installing npm dependencies...'
 npm install
 if ($LASTEXITCODE -ne 0) { Write-Err2 'npm install failed.'; exit 1 }
 
 # --- 3. Build ---------------------------------------------------------------
-Write-Step 'Building workspace libraries…'
+Write-Step 'Building workspace libraries...'
 npm run build -w @switchboard/sdk
 if ($LASTEXITCODE -ne 0) { exit 1 }
 npm run build -w @switchboard/core
@@ -76,7 +76,7 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # --- 4. Link `sw` globally --------------------------------------------------
 if (-not $NoLink) {
-  Write-Step 'Linking sw / switchboard binaries to your global npm prefix…'
+  Write-Step 'Linking sw / switchboard binaries to your global npm prefix...'
   Push-Location packages/server
   try {
     npm link
@@ -95,7 +95,7 @@ if (-not $NoLink) {
 
 # --- 5. Firewall (optional) -------------------------------------------------
 if ($OpenFirewall) {
-  Write-Step 'Adding Windows Defender Firewall rules for ports 8787 + 5173…'
+  Write-Step 'Adding Windows Defender Firewall rules for ports 8787 + 5173...'
   $isAdmin = ([Security.Principal.WindowsPrincipal] `
               [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
               [Security.Principal.WindowsBuiltInRole]::Administrator)
