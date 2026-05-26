@@ -2,6 +2,7 @@
 # (overrides Windows' core.autocrlf=true default which would corrupt biome's
 # lineEnding: "lf" enforcement on every git restore / fresh clone).
 * text=auto eol=lf
+*.bat text eol=crlf
 
 # Explicitly mark known binary types so git never tries to normalize them.
 *.png    binary

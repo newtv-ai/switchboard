@@ -297,6 +297,9 @@ SWITCHBOARD_DEBUG=1 sw                # 服务端
 #   [switchboard:debug] /ws close code=1006 reason=… hasHandle=true …
 ```
 
+### 往上滚能看到重复的横幅 / 状态行（scrollback 污染）
+这是 Claude Code 上游问题，不是 Switchboard 的 bug。Claude Code 使用 [Ink](https://github.com/vadimdemedes/ink)（React-for-CLI），每次状态变化（加载 observations、关闭对话框、SIGWINCH 等）都做全屏重渲染：先发 `ESC[H`（光标回视口原点），再逐行 `ESC[K` 重画。当绘制内容超出视口高度时，多出的行溢出进 scrollback 缓冲区。下一次 `ESC[H` 只能回到当前视口顶部，无法擦除已经推进 scrollback 的旧帧。结果：每次重渲在 scrollback 里沉积一层"残影"，22 次重渲 = 22 份重复。桌面终端往上滚一样能看到，Switchboard 只是让它更明显。上游 issue 见 [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086)、[claude-code#52027](https://github.com/anthropics/claude-code/issues/52027)。
+
 ## 项目结构
 
 ```

@@ -297,6 +297,9 @@ SWITCHBOARD_DEBUG=1 sw                # server side
 #   [switchboard:debug] /ws close code=1006 reason=… hasHandle=true …
 ```
 
+### Scrolling up shows duplicate banners / status lines (scrollback pollution)
+This is a known upstream issue, not a Switchboard bug. Claude Code uses [Ink](https://github.com/vadimdemedes/ink) (React-for-CLI), which performs full-screen re-renders on every state change (loading observations, dismissing dialogs, SIGWINCH, etc.). Each re-render sends `ESC[H` (cursor to viewport origin) then redraws every line with `ESC[K`. When the drawn content exceeds the viewport height, the excess overflows into the scrollback buffer. The next `ESC[H` can only reach the current viewport top -- it cannot erase the overflow already pushed into scrollback. Result: each re-render deposits one "ghost frame" in scrollback. 22 re-renders = 22 duplicates. The same artifacts exist on a desktop terminal if you scroll up; Switchboard simply makes them more visible. See [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086), [claude-code#52027](https://github.com/anthropics/claude-code/issues/52027) for upstream reports.
+
 ## Project layout
 
 ```
