@@ -157,7 +157,6 @@ export class Go2rtcManager {
       api: { listen: `:${apiPort}` },
       webrtc: {
         listen: `:${webrtcPort}`,
-        ice_servers: [{ urls: ['stun:stun.l.google.com:19302'] }],
       },
       streams: {
         phone_cam: null,

@@ -14,7 +14,11 @@ export interface CameraPushActions {
   isMuted: boolean;
 }
 
-const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+// No STUN servers needed — phone-as-webcam is LAN-only (or Tailscale virtual LAN).
+// Without STUN, the browser generates only host candidates (local IPs), which
+// connect instantly with zero timeout. STUN would add 2-10s delay on first frame
+// and is unreachable in many China networks.
+const ICE_SERVERS: RTCIceServer[] = [];
 
 /**
  * React hook: push phone camera+mic to go2rtc via WHIP.
@@ -70,8 +74,7 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Wait briefly for host ICE candidates (local network, instant).
-      // Don't wait for STUN — often unreachable in China / corporate networks.
+      // Wait for host ICE candidates only (no STUN = instant gathering).
       await Promise.race([
         new Promise<void>((resolve) => {
           if (pc.iceGatheringState === 'complete') { resolve(); return; }
@@ -79,7 +82,7 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
             if (pc.iceGatheringState === 'complete') resolve();
           });
         }),
-        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
       ]);
 
       const sdpOffer = pc.localDescription?.sdp;
