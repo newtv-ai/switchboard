@@ -134,6 +134,16 @@ async function registerProxyRoutes(app: FastifyInstance, manager: Go2rtcManager)
     if (src && !safeSchemes.some((s) => src.toLowerCase().startsWith(s))) {
       return reply.code(400).send({ error: 'only rtsp/rtmp/http(s) URLs are allowed' });
     }
+    // Check for duplicate URL across existing streams
+    const existing = await manager.listStreams();
+    if (existing && src) {
+      for (const [existingName, info] of Object.entries(existing)) {
+        const producers = (info as { producers?: Array<{ url?: string }> }).producers;
+        if (Array.isArray(producers) && producers.some((p) => p.url === src)) {
+          return reply.code(400).send({ error: `URL already added as "${existingName}" / 该 URL 已存在` });
+        }
+      }
+    }
     const ok = await manager.addStream(name, src ?? '');
     return ok ? { success: true } : reply.code(500).send({ error: 'failed to add stream' });
   });
