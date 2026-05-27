@@ -102,10 +102,13 @@ export function bindWrap(socket: WebSocket, sessions: SessionManager): void {
   });
 
   socket.on('close', () => {
-    // Wrapper disconnected unexpectedly — treat as session exit so any attached
-    // browsers know to clear it.
     if (backend) {
-      backend.pushExit(-1);
+      // Don't destroy the session immediately — the wrapper process may still
+      // be alive after a transient network blip or server restart.  Give it a
+      // grace period to reconnect.  If the session has already been disposed
+      // (normal exit, user kill), pushExit is a safe no-op (disposed guard).
+      const b = backend;
+      setTimeout(() => b.pushExit(-1), 30_000);
       backend = undefined;
     }
     session = undefined;

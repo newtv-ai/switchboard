@@ -412,7 +412,7 @@ switchboard/
 随 Phase 2 一起落地的手机可用性跟进（本来应该是 Phase 5）：
 - **visualViewport 驱动的 `--app-h`**：布局在虚拟键盘上方自动收缩。CSS `100dvh` 在 MIUI/小米浏览器上不可靠；`window.visualViewport` API 在 iOS Safari + Android Chrome + MIUI 上给出正确的"键盘感知"视口高。
 - **快捷操作工具栏**：Esc / Tab / ⇧Tab / ↑↓←→ / Ctrl+C —— 手机虚拟键盘打不出来的字节。每个按钮用 `onPointerDown + preventDefault` 保持焦点在 xterm helper textarea 上（这样 IME 面板不会在两次点击之间消失）。
-- **逐客户端尺寸跟踪 + split policy（MAX cols, MIN rows）**：`Session.attach()` 现在返回一个 `ClientHandle`，跟踪每个 attach 客户端上报的视口。`refitToClients()` 在所有 attach 客户端里取 `max(cols)` 和 `min(rows)`。理由：alt-screen TUI（claude code、codex）里，光标位置如果在小客户端 rows 之上会被裁掉，那部分内容根本就不会进入小客户端的 xterm buffer——所以输入提示要在小客户端上可达就需要 MIN rows。Cols 不匹配会裁右边但左边（提示所在）还能渲染，所以 MAX cols 让宽客户端继续可用。
+- **逐客户端尺寸跟踪 + split policy（MIN cols, MIN rows）**：`Session.attach()` 现在返回一个 `ClientHandle`，跟踪每个 attach 客户端上报的视口。`refitToClients()` 在所有 attach 客户端里取 `min(cols)` 和 `min(rows)`。理由：alt-screen TUI（claude code、codex）里，光标位置如果在小客户端 rows 之上会被裁掉，那部分内容根本就不会进入小客户端的 xterm buffer——所以输入提示要在小客户端上可达就需要 MIN rows。Cols 不匹配会裁右边但左边（提示所在）还能渲染，所以 MAX cols 让宽客户端继续可用。
 
 ### Phase 3 —— Adapter 插件系统 & Claude/Codex Adapter  （目标：3-4 天）—— 原 Phase 2
 - [ ] Adapter 注册表：启动时从 `packages/adapter-*` 加载 adapter；为外部解析留出余地
@@ -502,7 +502,7 @@ switchboard/
 
 ### 近期变更
 - 2026-05-23 — v0.9 — **Phase 2 闸门通过**：跨手机 + 桌面的多客户端实地测试通过。Wrapper 在 headless 跑（没有本地 TTY）时尊重服务端驱动的 resize，所以后台 wrapper 正确采纳浏览器协商的 PTY 尺寸。快捷操作栏在 ≥ 600px 视口（有物理键盘）下隐藏。
-- 2026-05-23 — v0.8 — **多客户端会话尺寸**：`Session.attach()` 返回 `ClientHandle`；逐客户端跟踪视口；PTY 在所有 attach 客户端上 refit 到 `max(cols)` + `min(rows)`。修了"桌面视图在手机最后 attach 时变窄"和"手机在桌面也 attach 时看不到输入提示"两个问题。
+- 2026-05-23 — v0.8 — **多客户端会话尺寸**：`Session.attach()` 返回 `ClientHandle`；逐客户端跟踪视口；PTY 在所有 attach 客户端上 refit 到 `min(cols)` + `min(rows)`。修了"桌面视图在手机最后 attach 时变窄"和"手机在桌面也 attach 时看不到输入提示"两个问题。
 - 2026-05-23 — v0.7 — **Phase 2 手机可用性修复**（从 Phase 5 提前）：visualViewport 驱动的 `--app-h` 实现键盘感知布局；快捷操作栏（Esc/Tab/⇧Tab/方向键/Ctrl+C）让 TUI 导航无需硬件键盘。
 - 2026-05-23 — v0.6 — **Phase 2 工程完成**：core 重构使用可插拔 `SessionBackend`（LocalPtyBackend / WrapperBackend）。加 `/wrap` WS 端点（localhost-only）。加 `switchboard run` 子命令。web 重构为 SessionList + TerminalView。Wrapper 端到端冒烟通过。实地浏览器闸门待定。还：发现 Windows ConPTY 不查 PATHEXT —— 加了 `resolveCommand()` helper。
 - 2026-05-23 — v0.5 — **架构转向**：主用例澄清为"包一个已有的桌面终端"，而不是"从手机 spawn"。加入 Mode A（wrapper）为主，保留 Mode B（server-spawn）为次。SPEC §1/§3 愿景 + 架构重写。§4.2 WS 协议现在定义两个端点（`/ws` 给浏览器，`/wrap` 给 wrapper）。Phase 顺序重排：新 Phase 2 = wrapper CLI；老 Phase 2（adapter 系统）挪到 Phase 3；老 Phase 6（Codex）合并到 Phase 3。还：移动 UI 小修（CJK 裁剪、侧间距收窄、移动字体）。

@@ -1,6 +1,7 @@
 import type { AgentAdapter, AgentManifest } from '@switchboard/sdk';
 import type { SessionBackend } from './backend.js';
 import { LocalPtyBackend } from './local-pty-backend.js';
+import { resolveCommand } from './resolve-command.js';
 import { Session, type SessionSummary } from './session.js';
 
 export interface SpawnOpts {
@@ -52,7 +53,7 @@ export class SessionManager {
     const spawnCfg = adapter.buildCommand({ cwd: opts.cwd, env: opts.env });
 
     const backend = new LocalPtyBackend({
-      command: spawnCfg.command,
+      command: resolveCommand(spawnCfg.command),
       args: spawnCfg.args,
       env: spawnCfg.env,
       cwd: spawnCfg.cwd,

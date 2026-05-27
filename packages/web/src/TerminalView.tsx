@@ -81,7 +81,9 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       e.stopImmediatePropagation();
       if (term.buffer.active.type === 'alternate') {
         e.preventDefault();
-        touchStartY = (e as TouchEvent).touches[0].clientY;
+        const t0 = (e as TouchEvent).touches[0];
+        if (!t0) return;
+        touchStartY = t0.clientY;
         touchAccum = 0;
       }
     };
@@ -90,8 +92,10 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       if (term.buffer.active.type === 'alternate') {
         e.preventDefault();
         const te = e as TouchEvent;
-        const deltaY = touchStartY - te.touches[0].clientY;
-        touchStartY = te.touches[0].clientY;
+        const touch = te.touches[0];
+        if (!touch) return;
+        const deltaY = touchStartY - touch.clientY;
+        touchStartY = touch.clientY;
         touchAccum += deltaY;
         const threshold = 30;
         while (Math.abs(touchAccum) >= threshold) {

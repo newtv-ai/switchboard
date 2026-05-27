@@ -1,33 +1,10 @@
-import { existsSync, mkdtempSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, extname, isAbsolute, join, basename as pathBasename } from 'node:path';
+import { basename as pathBasename } from 'node:path';
 import * as nodePty from 'node-pty';
 import WebSocket from 'ws';
+import { resolveCommand } from '@switchboard/core';
 import type { WrapClientMessage, WrapServerMessage } from './protocol.js';
-
-/**
- * Windows ConPTY (via node-pty) does NOT consult PATHEXT, so `claude` won't
- * auto-resolve to `claude.cmd` and `node` won't auto-resolve to `node.exe`.
- * Replicate the PATH+PATHEXT search ourselves; on POSIX it's just a PATH walk.
- */
-function resolveCommand(cmd: string): string {
-  if (isAbsolute(cmd) || cmd.includes('/') || cmd.includes('\\')) return cmd;
-
-  const paths = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
-  const isWindows = process.platform === 'win32';
-  const exts =
-    isWindows && extname(cmd) === ''
-      ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';')
-      : [''];
-
-  for (const dir of paths) {
-    for (const ext of exts) {
-      const candidate = join(dir, cmd + ext);
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return cmd; // fall through; let node-pty surface its own error
-}
 
 interface WrapperOptions {
   name: string | undefined;

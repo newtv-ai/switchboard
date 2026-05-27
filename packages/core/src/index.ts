@@ -1,3 +1,4 @@
+export { resolveCommand } from './resolve-command.js';
 export { RingBuffer } from './ring-buffer.js';
 export type { SessionBackend } from './backend.js';
 export { LocalPtyBackend, type LocalPtyOpts } from './local-pty-backend.js';
