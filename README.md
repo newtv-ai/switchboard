@@ -196,12 +196,14 @@ Switchboard includes an optional camera module powered by [go2rtc](https://githu
 
 ### Dual-port access
 
-| Port | Protocol | Features |
-|------|----------|----------|
-| `http://<ip>:5174` | HTTP | Terminal, file transfer, camera viewer — everything except phone camera push |
-| `https://<ip>:5173` | HTTPS | All of the above + phone camera push (getUserMedia requires HTTPS) |
+| Port | Protocol | Features | Recommended for |
+|------|----------|----------|----------------|
+| `http://<ip>:5174` | HTTP | Terminal, file transfer, camera viewer | Daily use (desktop + phone terminal control) |
+| `https://<ip>:5173` | HTTPS | All of the above + phone camera push | Only when you need phone-as-webcam |
 
-HTTPS certificates are auto-generated on first start (self-signed, valid 5 years, stored in `certs/`). Desktop browsers show a one-time "not secure" warning — click through once and it won't appear again.
+**Most users should use HTTP 5174 for daily work.** HTTPS 5173 is only needed when you want to use your phone's camera as a desktop webcam (browsers require HTTPS for `getUserMedia`). Don't keep both tabs open on your phone — use one or the other.
+
+HTTPS certificates are auto-generated on first start (self-signed, valid 5 years, stored in `certs/`). Desktop browsers show a one-time "not secure" warning — click through once and it won't appear again. Note: phone camera push is unavailable on HTTP 5174.
 
 ### Notes
 

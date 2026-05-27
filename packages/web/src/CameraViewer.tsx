@@ -4,6 +4,7 @@ import { useCameraPush } from './use-camera-push.js';
 export interface CameraViewerProps {
   serverBase: string;
   onBack: () => void;
+  visible?: boolean;
 }
 
 interface CameraSource {
@@ -18,7 +19,7 @@ function nextCameraName(existing: CameraSource[]): string {
   }
 }
 
-export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Element {
+export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewerProps): JSX.Element {
   const [sources, setSources] = useState<CameraSource[]>([]);
   const [phoneLive, setPhoneLive] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -56,13 +57,17 @@ export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Ele
     }
   }, [serverBase]);
 
-  useEffect(() => { fetchSources(); }, [fetchSources]);
+  useEffect(() => {
+    if (!visible) return;
+    fetchSources();
+  }, [fetchSources, visible]);
 
   useEffect(() => {
+    if (!visible) return;
     checkPhoneStatus();
     const interval = setInterval(checkPhoneStatus, 3000);
     return () => clearInterval(interval);
-  }, [checkPhoneStatus]);
+  }, [checkPhoneStatus, visible]);
 
   // Don't stop camera on unmount — CameraViewer stays mounted (hidden) so stream persists
 
@@ -204,15 +209,25 @@ RTMP:
           {/* Phone cam - auto appears when live */}
           {phoneLive && (
             <div style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
+              display: 'flex', flexDirection: 'column', gap: '4px',
               padding: '8px 12px', background: '#1a1a1a', borderRadius: '6px', marginBottom: '6px',
             }}>
-              <span style={{ flex: 1, fontSize: '14px' }}>
-                phone_cam <span style={{ color: '#4ade80', fontSize: '12px', marginLeft: '6px' }}>LIVE</span>
-              </span>
-              <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => setSelected('phone_cam')}>
-                View
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ flex: 1, fontSize: '14px' }}>
+                  phone_cam <span style={{ color: '#4ade80', fontSize: '12px', marginLeft: '6px' }}>LIVE</span>
+                </span>
+                <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => setSelected('phone_cam')}>
+                  View
+                </button>
+              </div>
+              <details style={{ fontSize: '11px', color: '#888' }}>
+                <summary style={{ cursor: 'pointer' }}>OBS / VLC URL</summary>
+                <div style={{ marginTop: '4px', padding: '6px', background: '#111', borderRadius: '4px', wordBreak: 'break-all' }}>
+                  <div>MP4: <code>http://localhost:1984/api/stream.mp4?src=phone_cam</code></div>
+                  <div>MJPEG: <code>http://localhost:1984/api/frame.jpeg?src=phone_cam</code></div>
+                  <div>View: <code>http://localhost:1984/stream.html?src=phone_cam</code></div>
+                </div>
+              </details>
             </div>
           )}
 
