@@ -50,6 +50,9 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
     facingRef.current = facingMode;
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera requires HTTPS. Please access via https:// or use Tailscale HTTPS.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: true,

@@ -131,7 +131,7 @@ export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Ele
           <iframe
             src={streamUrl!}
             style={{ flex: 1, border: 'none', background: '#000', width: '100%' }}
-            allow="autoplay; fullscreen"
+            allow="autoplay; camera; microphone; fullscreen"
             allowFullScreen
             title={`Camera: ${selected}`}
           />

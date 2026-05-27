@@ -99,6 +99,15 @@ async function registerProxyRoutes(app: FastifyInstance, manager: Go2rtcManager)
     });
   }
 
+  // Proxy go2rtc static web assets & other APIs (essential for production stream.html access)
+  await app.register(proxy, {
+    upstream,
+    prefix: '/go2rtc',
+    rewritePrefix: '',
+    websocket: true,
+    preHandler: authPreHandler,
+  });
+
   // Note: WebSocket proxy for go2rtc MSE is deferred — @fastify/http-proxy's
   // websocket mode conflicts with @fastify/websocket on the /ws endpoint.
   // WebRTC WHEP/WHIP uses HTTP POST, so camera viewing works without WS proxy.

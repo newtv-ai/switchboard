@@ -113,7 +113,7 @@ export class Go2rtcManager {
   async removeStream(name: string): Promise<boolean> {
     try {
       await fetch(
-        `${this.apiBase}/api/streams?dst=${encodeURIComponent(name)}`,
+        `${this.apiBase}/api/streams?src=${encodeURIComponent(name)}`,
         { method: 'DELETE', signal: AbortSignal.timeout(5000) },
       );
       const streams = await this.listStreams();

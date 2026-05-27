@@ -66,14 +66,12 @@ export async function ensureGo2rtc(
       // Download zip to temp, then extract the binary
       const zipFile = tmpFile + '.zip';
       const zipStream = createWriteStream(zipFile);
-      // @ts-expect-error ReadableStream/NodeStream interop
       await pipeline(resp.body, zipStream);
       await extractFromZip(zipFile, target);
       try { unlinkSync(zipFile); } catch { /* ignore */ }
     } else {
       // Bare binary (Linux) — direct download
       const fileStream = createWriteStream(tmpFile);
-      // @ts-expect-error ReadableStream/NodeStream interop
       await pipeline(resp.body, fileStream);
       if (existsSync(target)) unlinkSync(target);
       renameSync(tmpFile, target);
@@ -81,6 +79,11 @@ export async function ensureGo2rtc(
 
     if (process.platform !== 'win32') {
       chmodSync(target, 0o755);
+    }
+    if (process.platform === 'darwin') {
+      try {
+        execSync(`xattr -r -d com.apple.quarantine "${target}"`, { stdio: 'ignore' });
+      } catch { /* best-effort */ }
     }
 
     onLog?.(`[go2rtc] downloaded to ${target}`);
