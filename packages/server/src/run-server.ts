@@ -12,10 +12,9 @@ export async function runServer(): Promise<void> {
 
   const server = await startServer({ host, port });
 
-  const wsProto = server.url.startsWith('https') ? 'wss' : 'ws';
   console.log(`\n  Switchboard server listening on ${server.url}`);
-  console.log(`  Browser WS:  ${wsProto}://${host}:${port}/ws`);
-  console.log(`  Wrapper WS:  ${wsProto}://127.0.0.1:${port}/wrap (localhost-only)`);
+  console.log(`  Browser WS:  ws://${host}:${port}/ws`);
+  console.log(`  Wrapper WS:  ws://127.0.0.1:${port}/wrap (localhost-only)`);
   console.log(`  Health:      ${server.url}/health`);
   if (host === '0.0.0.0') {
     console.log(
