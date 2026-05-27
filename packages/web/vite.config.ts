@@ -1,5 +1,7 @@
-import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import react from '@vitejs/plugin-react';
 import forge from 'node-forge';
@@ -44,6 +46,24 @@ function ensureCerts(): { key: string; cert: string } {
 
 const tls = ensureCerts();
 const HTTP_PORT = 5174;
+const HTTPS_PORT = 5173;
+
+let actualHttpsPort = HTTPS_PORT;
+let actualHttpPort = HTTP_PORT;
+
+function makeProxyOpts(req: IncomingMessage): RequestOptions {
+  const headers = { ...req.headers };
+  // Rewrite Host to target HTTPS port to satisfy Vite's host checking
+  headers.host = `127.0.0.1:${actualHttpsPort}`;
+  return {
+    hostname: '127.0.0.1',
+    port: actualHttpsPort,
+    path: req.url,
+    method: req.method,
+    headers: headers,
+    rejectUnauthorized: false,
+  };
+}
 
 export default defineConfig({
   plugins: [
@@ -51,26 +71,73 @@ export default defineConfig({
     {
       name: 'http-mirror',
       configureServer(server) {
-        // Create a plain HTTP server sharing Vite's middleware stack.
-        // Same UI, same proxy — just no TLS. For users who don't need
-        // phone camera push (getUserMedia requires HTTPS).
         server.httpServer?.once('listening', () => {
-          const httpServer = createHttpServer(server.middlewares);
-          httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
-            console.log(`  HTTP:   http://0.0.0.0:${HTTP_PORT} (all features except phone camera push)`);
-            console.log(`  HTTPS:  https://0.0.0.0:5173 (full features including phone camera)`);
+          const address = server.httpServer?.address();
+          if (address && typeof address === 'object') {
+            actualHttpsPort = address.port;
+          }
+          
+          const mirror = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+            const proxy = httpsRequest(makeProxyOpts(req), (proxyRes) => {
+              res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
+              proxyRes.pipe(res, { end: true });
+            });
+            proxy.on('error', (err) => {
+              if (!res.headersSent) { res.writeHead(502); res.end(`mirror error: ${err.message}`); }
+            });
+            
+            if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+              proxy.end();
+            } else {
+              req.pipe(proxy, { end: true });
+            }
           });
-          httpServer.on('error', () => { /* port busy, skip */ });
+
+          mirror.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+            const proxy = httpsRequest({ ...makeProxyOpts(req), method: 'GET' });
+            proxy.on('upgrade', (proxyRes, proxySocket: Duplex, proxyHead: Buffer) => {
+              let rawHeaders = `HTTP/1.1 101 ${proxyRes.statusMessage || 'Switching Protocols'}\r\n`;
+              for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+                rawHeaders += `${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`;
+              }
+              rawHeaders += '\r\n';
+              socket.write(rawHeaders);
+              if (proxyHead.length) socket.write(proxyHead);
+              proxySocket.pipe(socket);
+              socket.pipe(proxySocket);
+              proxySocket.on('error', () => socket.destroy());
+              socket.on('error', () => proxySocket.destroy());
+            });
+            proxy.on('error', () => socket.destroy());
+            if (head.length) proxy.write(head);
+            proxy.end();
+          });
+
+          // 从 HTTPS 端口 + 1 开始尝试，避免端口冲突并实现自适应
+          const startHttpPort = actualHttpsPort + 1;
+          const listenWithRetry = (port: number) => {
+            mirror.once('error', (err: any) => {
+              if (err.code === 'EADDRINUSE') {
+                listenWithRetry(port + 1);
+              }
+            });
+            mirror.listen(port, '0.0.0.0', () => {
+              actualHttpPort = port;
+              console.log(`  HTTP:   http://localhost:${actualHttpPort} (all features except phone camera push)`);
+            });
+          };
+
+          listenWithRetry(startHttpPort);
         });
       },
     },
   ],
   server: {
-    port: 5173,
+    port: HTTPS_PORT,
     host: '0.0.0.0',
     https: { key: tls.key, cert: tls.cert },
     hmr: {
-      port: 5173,
+      port: HTTPS_PORT,
       protocol: 'wss',
     },
     proxy: {
