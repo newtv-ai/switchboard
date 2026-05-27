@@ -33,6 +33,7 @@
 - [Run](#run)
 - [Phone access (LAN / Tailscale)](#phone-access-lan--tailscale)
 - [File transfer (phone ↔ dev box)](#file-transfer-phone--dev-box)
+- [Camera (phone as webcam + remote camera viewer)](#camera-phone-as-webcam--remote-camera-viewer)
 - [Firewall — opening the port](#firewall--opening-the-port)
 - [Supported agents](#supported-agents)
 - [FAQ](#faq)
@@ -175,6 +176,99 @@ The folder is called slightly different things depending on phone and language �
 
 The Switchboard upload dialog will surface this hint automatically when an upload error looks permission-related.
 
+## Camera (phone as webcam + remote camera viewer)
+
+Switchboard includes an optional camera module powered by [go2rtc](https://github.com/AlexxIT/go2rtc). Two directions:
+
+| Direction | What it does | Use case |
+|-----------|-------------|----------|
+| **Phone → Desktop** | Use your phone camera as a webcam for Zoom/Teams/WeChat | Video calls, screen recording |
+| **Desktop → Phone** | View IP cameras (RTSP) or USB webcams from your phone | NAS monitoring, baby cam, 3D printer |
+
+### Quick start
+
+1. Start the server normally (`start.bat` or `npm run dev`). go2rtc is downloaded automatically on first launch.
+2. Open the web UI → click **Cameras**.
+3. **To view an IP camera**: paste an RTSP URL (e.g. `rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/1`) → click Add → click View.
+4. **To use phone as webcam**: on your phone, open `https://<your-ip>:5173` → Cameras → Start Camera.
+   Then on desktop, open `http://localhost:1984/stream.html?src=phone_cam` to see the stream.
+   To use in Zoom/Teams: OBS → Media Source → URL `http://localhost:1984/api/stream.mp4?src=phone_cam` → Start Virtual Camera.
+
+### Dual-port access
+
+| Port | Protocol | Features |
+|------|----------|----------|
+| `http://<ip>:5174` | HTTP | Terminal, file transfer, camera viewer — everything except phone camera push |
+| `https://<ip>:5173` | HTTPS | All of the above + phone camera push (getUserMedia requires HTTPS) |
+
+HTTPS certificates are auto-generated on first start (self-signed, valid 5 years, stored in `certs/`). Desktop browsers show a one-time "not secure" warning — click through once and it won't appear again.
+
+### Notes
+
+- **H.264 and H.265** both supported. go2rtc handles codec negotiation automatically.
+- **Camera configs persist** across server restarts (`~/.switchboard/cameras.json`).
+- **Phone camera persists** across page navigation — start streaming on the Cameras page, then switch to Terminal, the stream keeps going.
+- **go2rtc auto-download**: ~15MB binary downloaded from GitHub on first use. If GitHub is blocked (e.g. mainland China), see the FAQ below for manual install.
+- **Firewall**: go2rtc uses port **8555** (UDP+TCP) for WebRTC. If phone camera push doesn't connect, open this port in your firewall alongside 5173/5174/8787.
+
+### Camera module: adding video streams
+
+The Cameras page accepts standard streaming URLs. Common formats:
+
+**IP cameras (RTSP)**
+```
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/1     # Hikvision main stream
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/2     # Hikvision sub stream
+rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0  # Dahua
+rtsp://admin:password@192.168.1.100:554/stream1                  # generic ONVIF
+rtsp://192.168.1.100:8554/mystream                               # RTSP server (no auth)
+```
+
+**HTTP streams**
+```
+http://192.168.1.100:8080/video                                  # MJPEG / HTTP-FLV
+https://example.com/live/stream.m3u8                             # HLS
+```
+
+**RTMP**
+```
+rtmp://192.168.1.100/live/stream
+```
+
+**Tips:**
+- Most IP cameras use port `554` for RTSP. Check your camera's admin page for the exact URL path.
+- Use the **sub stream** (lower resolution) to reduce bandwidth if the main stream is too heavy.
+- If unsure about the URL, try your camera's ONVIF address: `rtsp://<ip>:554/onvif1`.
+- Test the URL with VLC first (`Media > Open Network Stream`) to confirm it works before adding to Switchboard.
+
+### Camera module: go2rtc fails to download automatically
+
+The camera module auto-downloads [go2rtc](https://github.com/AlexxIT/go2rtc) from GitHub Releases on first use. If you're behind a firewall that blocks GitHub (common in mainland China), you can install it manually:
+
+1. Download the correct binary for your platform from a mirror or another machine:
+   - Windows x64: `go2rtc_win64.zip`
+   - macOS Apple Silicon: `go2rtc_mac_arm64.zip`
+   - macOS Intel: `go2rtc_mac_amd64.zip`
+   - Linux x64: `go2rtc_linux_amd64`
+   - Linux ARM64: `go2rtc_linux_arm64`
+
+   Official releases: https://github.com/AlexxIT/go2rtc/releases
+
+2. Extract and place the binary:
+   ```bash
+   # Windows — extract go2rtc.exe to:
+   %USERPROFILE%\.switchboard\bin\go2rtc.exe
+
+   # macOS / Linux — extract and chmod:
+   mkdir -p ~/.switchboard/bin
+   # (copy go2rtc binary here)
+   chmod +x ~/.switchboard/bin/go2rtc
+   ```
+
+3. Alternatively, put `go2rtc` anywhere on your system PATH.
+
+4. Restart the server. You should see `[camera] module loaded` in the logs.
+
 ## Firewall — opening the port
 
 Switchboard binds to `0.0.0.0` so anything on the network can reach it (web on `5173`, server on `8787`). If the phone can't connect, the OS firewall is blocking inbound TCP.
@@ -300,64 +394,6 @@ SWITCHBOARD_DEBUG=1 sw                # server side
 ### Scrolling up shows duplicate banners / status lines (scrollback pollution)
 This is a known upstream issue, not a Switchboard bug. Claude Code uses [Ink](https://github.com/vadimdemedes/ink) (React-for-CLI), which performs full-screen re-renders on every state change (loading observations, dismissing dialogs, SIGWINCH, etc.). Each re-render sends `ESC[H` (cursor to viewport origin) then redraws every line with `ESC[K`. When the drawn content exceeds the viewport height, the excess overflows into the scrollback buffer. The next `ESC[H` can only reach the current viewport top -- it cannot erase the overflow already pushed into scrollback. Result: each re-render deposits one "ghost frame" in scrollback. 22 re-renders = 22 duplicates. The same artifacts exist on a desktop terminal if you scroll up; Switchboard simply makes them more visible. See [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086), [claude-code#52027](https://github.com/anthropics/claude-code/issues/52027) for upstream reports. **Current mitigation:** the mobile web client auto-scrolls to the latest output so duplicate frames stay out of sight during normal use; the terminal also supports dual-mode scroll handling (native browser scroll in default mode, PgUp/PgDn translation in fullscreen mode). Feedback welcome via [Issues](https://github.com/newtv-ai/switchboard/issues).
 
-### Camera module: adding video streams
-
-The Cameras page accepts standard streaming URLs. Common formats:
-
-**IP cameras (RTSP)**
-```
-rtsp://admin:password@192.168.1.100:554/Streaming/Channels/1     # Hikvision main stream
-rtsp://admin:password@192.168.1.100:554/Streaming/Channels/2     # Hikvision sub stream
-rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0  # Dahua
-rtsp://admin:password@192.168.1.100:554/stream1                  # generic ONVIF
-rtsp://192.168.1.100:8554/mystream                               # RTSP server (no auth)
-```
-
-**HTTP streams**
-```
-http://192.168.1.100:8080/video                                  # MJPEG / HTTP-FLV
-https://example.com/live/stream.m3u8                             # HLS
-```
-
-**RTMP**
-```
-rtmp://192.168.1.100/live/stream
-```
-
-**Tips:**
-- Most IP cameras use port `554` for RTSP. Check your camera's admin page for the exact URL path.
-- Use the **sub stream** (lower resolution) to reduce bandwidth if the main stream is too heavy.
-- If unsure about the URL, try your camera's ONVIF address: `rtsp://<ip>:554/onvif1`.
-- Test the URL with VLC first (`Media > Open Network Stream`) to confirm it works before adding to Switchboard.
-
-### Camera module: go2rtc fails to download automatically
-
-The camera module (`@switchboard/camera`) auto-downloads [go2rtc](https://github.com/AlexxIT/go2rtc) from GitHub Releases on first use. If you're behind a firewall that blocks GitHub (common in mainland China), you can install it manually:
-
-1. Download the correct binary for your platform from a mirror or another machine:
-   - Windows x64: `go2rtc_win64.zip`
-   - macOS Apple Silicon: `go2rtc_mac_arm64.zip`
-   - macOS Intel: `go2rtc_mac_amd64.zip`
-   - Linux x64: `go2rtc_linux_amd64`
-   - Linux ARM64: `go2rtc_linux_arm64`
-
-   Official releases: https://github.com/AlexxIT/go2rtc/releases
-
-2. Extract and place the binary:
-   ```bash
-   # Windows — extract go2rtc.exe to:
-   %USERPROFILE%\.switchboard\bin\go2rtc.exe
-
-   # macOS / Linux — extract and chmod:
-   mkdir -p ~/.switchboard/bin
-   # (copy go2rtc binary here)
-   chmod +x ~/.switchboard/bin/go2rtc
-   ```
-
-3. Alternatively, put `go2rtc` anywhere on your system PATH.
-
-4. Restart the server. You should see `[camera] module loaded` in the logs.
-
 ## Project layout
 
 ```
@@ -366,7 +402,8 @@ switchboard/
 │   ├── sdk/         # public AgentAdapter contract — what third-party adapters import
 │   ├── core/        # Session, RingBuffer, WrapperBackend — agent-agnostic
 │   ├── server/      # Fastify HTTP+WS server + `sw run` CLI + built-in adapters
-│   └── web/         # React + xterm.js frontend
+│   ├── web/         # React + xterm.js frontend
+│   └── camera/      # Optional: go2rtc sidecar for camera streaming
 ├── scripts/
 │   ├── install.sh   # Linux & macOS installer
 │   └── install.ps1  # Windows installer

@@ -33,6 +33,7 @@
 - [运行](#运行)
 - [手机访问（局域网 / Tailscale）](#手机访问局域网--tailscale)
 - [文件互传（手机 ↔ 开发机）](#文件互传手机--开发机)
+- [摄像头（手机当摄像头 + 远程查看摄像头）](#摄像头手机当摄像头--远程查看摄像头)
 - [防火墙——开端口](#防火墙开端口)
 - [支持的 agent](#支持的-agent)
 - [FAQ](#faq)
@@ -300,6 +301,41 @@ SWITCHBOARD_DEBUG=1 sw                # 服务端
 ### 往上滚能看到重复的横幅 / 状态行（scrollback 污染）
 这是 Claude Code 上游问题，不是 Switchboard 的 bug。Claude Code 使用 [Ink](https://github.com/vadimdemedes/ink)（React-for-CLI），每次状态变化（加载 observations、关闭对话框、SIGWINCH 等）都做全屏重渲染：先发 `ESC[H`（光标回视口原点），再逐行 `ESC[K` 重画。当绘制内容超出视口高度时，多出的行溢出进 scrollback 缓冲区。下一次 `ESC[H` 只能回到当前视口顶部，无法擦除已经推进 scrollback 的旧帧。结果：每次重渲在 scrollback 里沉积一层"残影"，22 次重渲 = 22 份重复。桌面终端往上滚一样能看到，Switchboard 只是让它更明显。上游 issue 见 [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086)、[claude-code#52027](https://github.com/anthropics/claude-code/issues/52027)。**当前缓解措施：** 手机端自动跟随最新输出，正常使用时重复帧不会出现在视野内；终端还支持双模滚动（default 模式下浏览器原生滚动，fullscreen 模式下 PgUp/PgDn 翻译）。欢迎通过 [Issues](https://github.com/newtv-ai/switchboard/issues) 反馈。
 
+## 摄像头（手机当摄像头 + 远程查看摄像头）
+
+Switchboard 内置可选摄像头模块，基于 [go2rtc](https://github.com/AlexxIT/go2rtc)，支持双向视频流：
+
+| 方向 | 功能 | 使用场景 |
+|------|------|---------|
+| **手机 → 电脑** | 手机摄像头当电脑虚拟摄像头 | 视频会议、直播、录屏 |
+| **电脑 → 手机** | 手机远程查看电脑/NAS 上的 IP 摄像头 | 安防监控、宝宝看护、3D 打印 |
+
+### 快速上手
+
+1. 正常启动 server（`start.bat` 或 `npm run dev`）。go2rtc 首次启动时自动从 GitHub 下载。
+2. 打开网页 → 点击 **Cameras**。
+3. **查看 IP 摄像头**：粘贴 RTSP URL（如 `rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/1`）→ 点 Add → 点 View。
+4. **手机当摄像头**：手机打开 `https://<电脑IP>:5173` → Cameras → Start Camera。
+   电脑端打开 `http://localhost:1984/stream.html?src=phone_cam` 查看画面。
+   在 Zoom/微信中使用：OBS → 媒体源 → URL `http://localhost:1984/api/stream.mp4?src=phone_cam` → 启动虚拟摄像头。
+
+### 双端口访问
+
+| 端口 | 协议 | 功能 |
+|------|------|------|
+| `http://<ip>:5174` | HTTP | 终端、文件传输、摄像头查看 — 除手机推流外全部功能 |
+| `https://<ip>:5173` | HTTPS | 以上全部 + 手机摄像头推流（getUserMedia 要求 HTTPS） |
+
+HTTPS 证书首次启动自动生成（自签名，5 年有效，存储在 `certs/`）。桌面浏览器首次会提示"不安全"——点一次"继续访问"之后不再出现。
+
+### 注意事项
+
+- **H.264 和 H.265** 都支持，go2rtc 自动处理编解码协商。
+- **摄像头配置持久化**，重启不丢失（`~/.switchboard/cameras.json`）。
+- **手机推流跨页面保持**——在 Cameras 页开始推流后切到 Terminal 页，推流不断。
+- **go2rtc 自动下载**：首次使用从 GitHub 下载约 15MB 二进制。国内无法下载请看下方常见问题。
+- **防火墙**：go2rtc WebRTC 使用 **8555** 端口（UDP+TCP）。手机推流连不上时需要开放此端口。
+
 ### 摄像头模块：添加视频流格式
 
 Cameras 页面支持标准流媒体 URL。常见格式：
@@ -366,7 +402,8 @@ switchboard/
 │   ├── sdk/         # 公开的 AgentAdapter 契约——第三方 adapter 从这里引
 │   ├── core/        # Session、RingBuffer、WrapperBackend——agent-agnostic
 │   ├── server/      # Fastify HTTP+WS 服务 + `sw run` CLI + 内置 adapter
-│   └── web/         # React + xterm.js 前端
+│   ├── web/         # React + xterm.js 前端
+│   └── camera/      # 可选：go2rtc 摄像头流媒体
 ├── scripts/
 │   ├── install.sh   # Linux & macOS 安装脚本
 │   └── install.ps1  # Windows 安装脚本
