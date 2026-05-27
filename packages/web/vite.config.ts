@@ -69,6 +69,10 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     https: { key: tls.key, cert: tls.cert },
+    hmr: {
+      port: 5173,
+      protocol: 'wss',
+    },
     proxy: {
       '/go2rtc': {
         target: 'http://127.0.0.1:1984',
