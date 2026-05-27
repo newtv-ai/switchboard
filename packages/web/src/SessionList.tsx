@@ -32,6 +32,11 @@ export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps)
         return;
       }
       if (msg.type === 'sessions') setSessions(msg.list);
+      if (msg.type === 'ping') {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
+      }
     };
 
     return () => {

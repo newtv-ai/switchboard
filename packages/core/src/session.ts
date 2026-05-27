@@ -146,14 +146,16 @@ export class Session implements SessionHandle {
    */
   attach(listener: SessionListener, initialSize?: { cols: number; rows: number }): ClientHandle {
     const clientId = randomUUID();
-    this.clients.set(clientId, { listener, size: initialSize });
+    let isReady = !initialSize;
+    this.clients.set(clientId, { listener, size: undefined });
     if (initialSize) {
-      // Defer the FIRST refit so the new client (esp. phone) finishes
-      // processing 'ready' + initial replay before the SIGWINCH-driven TUI
-      // redraw burst hits its WebSocket. Without this, phone WS closes
-      // mid-attach and the user is bounced back to the session list.
       const t = setTimeout(() => {
-        if (this.clients.has(clientId)) this.refitToClients();
+        const client = this.clients.get(clientId);
+        if (client) {
+          isReady = true;
+          client.size = initialSize;
+          this.refitToClients();
+        }
       }, 1200);
       if (typeof t.unref === 'function') t.unref();
     }
@@ -162,6 +164,10 @@ export class Session implements SessionHandle {
       resize: (cols, rows) => {
         const c = this.clients.get(clientId);
         if (!c) return;
+        if (!isReady) {
+          initialSize = { cols, rows };
+          return;
+        }
         c.size = { cols, rows };
         this.refitToClients();
       },

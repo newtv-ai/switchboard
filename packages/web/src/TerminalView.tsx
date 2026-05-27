@@ -193,6 +193,9 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
           return;
         }
         switch (msg.type) {
+          case 'ping':
+            sendWs({ type: 'pong' });
+            return;
           case 'sessions':
             return;
           case 'ready':
@@ -283,33 +286,30 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     };
     const resizeSub = term.onResize(({ cols, rows }) => {
       if (cols === lastReportedCols && rows === lastReportedRows) return;
-      if (cols !== lastReportedCols) {
-        if (reportTimer !== undefined) {
-          clearTimeout(reportTimer);
-          reportTimer = undefined;
-        }
-        flushReport(cols, rows);
-        return;
-      }
 
       const isNarrow = window.matchMedia('(max-width: 600px)').matches;
       // On mobile, ignore small row changes (e.g. <= 15 rows caused by large address bars hide/show)
       // to prevent PTY resize storms (which causes history to append duplicate dumps).
-      // We don't update lastReportedRows here so cumulative small changes are still measured against the last "valid" fit height.
       if (
         isNarrow &&
         Math.abs(rows - lastReportedRows) <= 15 &&
         Math.abs(rows - lastReportedRows) > 0
       ) {
-        // Do not trigger flushReport for tiny vertical resizes on mobile
-        return;
+        // If columns didn't change, suppress this small height change
+        if (cols === lastReportedCols) {
+          return;
+        }
       }
 
       if (reportTimer !== undefined) clearTimeout(reportTimer);
+
+      // Use unified debounce: 150ms if cols changed (feels snappy on re-orientation/window resize),
+      // 400ms for rows-only changes (completely absorbs transitional height changes during keyboard collapse)
+      const delay = cols !== lastReportedCols ? 150 : 400;
       reportTimer = setTimeout(() => {
         reportTimer = undefined;
         flushReport(cols, rows);
-      }, 500);
+      }, delay);
     });
 
     // Refit is debounced so a burst of size-change events collapses to one

@@ -24,7 +24,8 @@ export type ClientMessage =
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'action'; actionId: string; params?: unknown }
-  | { type: 'kill'; sessionId: string };
+  | { type: 'kill'; sessionId: string }
+  | { type: 'pong' };
 
 /** Messages the server may send on /ws. */
 export type ServerMessage =

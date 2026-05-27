@@ -131,6 +131,9 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           s?.kill();
           return;
         }
+        case 'pong': {
+          return;
+        }
         default: {
           const _exhaustive: never = msg;
           void _exhaustive;

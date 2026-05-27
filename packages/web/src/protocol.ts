@@ -48,7 +48,8 @@ export type ClientMessage =
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'action'; actionId: string; params?: unknown }
-  | { type: 'kill'; sessionId: string };
+  | { type: 'kill'; sessionId: string }
+  | { type: 'pong' };
 
 export type ServerMessage =
   | { type: 'sessions'; list: SessionSummary[] }

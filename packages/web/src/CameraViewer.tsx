@@ -223,9 +223,9 @@ RTMP:
               <details style={{ fontSize: '11px', color: '#888' }}>
                 <summary style={{ cursor: 'pointer' }}>OBS / VLC URL</summary>
                 <div style={{ marginTop: '4px', padding: '6px', background: '#111', borderRadius: '4px', wordBreak: 'break-all' }}>
-                  <div>MP4: <code>http://localhost:1984/api/stream.mp4?src=phone_cam</code></div>
-                  <div>MJPEG: <code>http://localhost:1984/api/frame.jpeg?src=phone_cam</code></div>
-                  <div>View: <code>http://localhost:1984/stream.html?src=phone_cam</code></div>
+                  <div>MP4: <code>{`${window.location.origin}/go2rtc/api/stream.mp4?src=phone_cam`}</code></div>
+                  <div>MJPEG: <code>{`${window.location.origin}/go2rtc/api/frame.jpeg?src=phone_cam`}</code></div>
+                  <div>View: <code>{`${window.location.origin}/go2rtc/stream.html?src=phone_cam`}</code></div>
                 </div>
               </details>
             </div>

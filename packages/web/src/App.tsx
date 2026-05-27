@@ -49,7 +49,7 @@ export function App(): JSX.Element {
     <>
       {/* CameraViewer always mounted so phone camera stream persists across navigation */}
       <div style={{ display: view.mode === 'cameras' ? 'contents' : 'none' }}>
-        <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} />
+        <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} visible={view.mode === 'cameras'} />
       </div>
       {view.mode === 'list' && (
         <SessionList
