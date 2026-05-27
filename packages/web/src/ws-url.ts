@@ -1,12 +1,5 @@
-const HOST = window.location.hostname;
-const PORT = 8787;
-
-// Auto-pick WS scheme + host to match the page origin so we work over
-// http://tailscale-ip:5173 and (future) https://… alike.
-export const WS_BASE = (() => {
-  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${HOST}:${PORT}`;
-})();
-
-// For HTTP fetch: use page origin (works with Vite proxy in dev, and same-origin in prod)
+// Use page origin for all requests — Vite proxy forwards /ws and /api to server.
+// This works for both http and https, dev and prod.
+const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+export const WS_BASE = `${scheme}://${window.location.host}`;
 export const HTTP_BASE = window.location.origin;

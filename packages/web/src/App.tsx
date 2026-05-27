@@ -45,23 +45,24 @@ export function App(): JSX.Element {
   // re-running on every parent render (which would tear down xterm + WS).
   const handleBack = useCallback(() => setView({ mode: 'list' }), []);
 
-  if (view.mode === 'cameras') {
-    return <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} />;
-  }
-
-  if (view.mode === 'list') {
-    return (
-      <SessionList
-        onAttach={(sessionId) =>
-          setView({ mode: 'terminal', target: { kind: 'attach', sessionId } })
-        }
-        onCreate={(adapterId) =>
-          setView({ mode: 'terminal', target: { kind: 'create', adapterId } })
-        }
-        onCameras={() => setView({ mode: 'cameras' })}
-      />
-    );
-  }
-
-  return <TerminalView target={view.target} onBack={handleBack} />;
+  return (
+    <>
+      {/* CameraViewer always mounted so phone camera stream persists across navigation */}
+      <div style={{ display: view.mode === 'cameras' ? 'contents' : 'none' }}>
+        <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} />
+      </div>
+      {view.mode === 'list' && (
+        <SessionList
+          onAttach={(sessionId) =>
+            setView({ mode: 'terminal', target: { kind: 'attach', sessionId } })
+          }
+          onCreate={(adapterId) =>
+            setView({ mode: 'terminal', target: { kind: 'create', adapterId } })
+          }
+          onCameras={() => setView({ mode: 'cameras' })}
+        />
+      )}
+      {view.mode === 'terminal' && <TerminalView target={view.target} onBack={handleBack} />}
+    </>
+  );
 }

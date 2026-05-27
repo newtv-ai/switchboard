@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+
+# TLS certificates (self-signed, generated locally)
+certs/
 .pnp
 .pnp.js
 

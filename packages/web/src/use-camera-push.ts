@@ -41,17 +41,17 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
     }
     setLocalStream(null);
     setIsStreaming(false);
-    setError(null);
     setIsMuted(false);
   }, []);
 
   const start = useCallback(async (facingMode: 'user' | 'environment' = 'environment') => {
     stop();
+    setError(null);
     facingRef.current = facingMode;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: true,
       });
       streamRef.current = stream;
@@ -67,6 +67,8 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      // Wait briefly for host ICE candidates (local network, instant).
+      // Don't wait for STUN — often unreachable in China / corporate networks.
       await Promise.race([
         new Promise<void>((resolve) => {
           if (pc.iceGatheringState === 'complete') { resolve(); return; }
@@ -74,11 +76,11 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
             if (pc.iceGatheringState === 'complete') resolve();
           });
         }),
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('ICE gathering timeout')), 10_000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
       ]);
 
       const sdpOffer = pc.localDescription?.sdp;
-      if (!sdpOffer) throw new Error('No local SDP after ICE gathering');
+      if (!sdpOffer) throw new Error('No local SDP');
 
       const resp = await fetch(`${serverBase}/api/camera/webrtc?dst=phone_cam`, {
         method: 'POST',
@@ -94,7 +96,7 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
       await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
 
       pc.addEventListener('connectionstatechange', () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        if (pc.connectionState === 'failed') {
           setError('WebRTC connection lost');
           stop();
         }

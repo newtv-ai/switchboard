@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useCameraPush } from './use-camera-push.js';
 
 export interface CameraViewerProps {
   serverBase: string;
@@ -19,25 +20,51 @@ function nextCameraName(existing: CameraSource[]): string {
 
 export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Element {
   const [sources, setSources] = useState<CameraSource[]>([]);
+  const [phoneLive, setPhoneLive] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [addUrl, setAddUrl] = useState('');
   const [addName, setAddName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
+  const cam = useCameraPush(serverBase);
 
   const fetchSources = useCallback(async () => {
     try {
       const resp = await fetch(`${serverBase}/api/camera/sources`);
       const data = (await resp.json()) as { sources: Record<string, unknown> };
-      const list = Object.keys(data.sources)
+      // User-added cameras only (exclude phone_cam)
+      const userCams = Object.keys(data.sources)
         .filter((n) => n !== 'phone_cam')
         .map((name) => ({ name }));
-      setSources(list);
+      setSources(userCams);
     } catch {
       setSources([]);
     }
   }, [serverBase]);
 
+  // Poll go2rtc to detect if phone_cam has active producers (someone is pushing)
+  const checkPhoneStatus = useCallback(async () => {
+    try {
+      const resp = await fetch(`${serverBase}/api/camera/streams`);
+      const streams = (await resp.json()) as Record<string, { producers?: unknown[] | string }>;
+      const pc = streams.phone_cam;
+      if (!pc) { setPhoneLive(false); return; }
+      const producers = pc.producers;
+      const hasProducer = Array.isArray(producers) ? producers.length > 0 : (typeof producers === 'string' && producers.length > 0);
+      setPhoneLive(hasProducer);
+    } catch {
+      setPhoneLive(false);
+    }
+  }, [serverBase]);
+
   useEffect(() => { fetchSources(); }, [fetchSources]);
+
+  useEffect(() => {
+    checkPhoneStatus();
+    const interval = setInterval(checkPhoneStatus, 3000);
+    return () => clearInterval(interval);
+  }, [checkPhoneStatus]);
+
+  // Don't stop camera on unmount — CameraViewer stays mounted (hidden) so stream persists
 
   const handleAdd = async () => {
     const name = addName.trim() || nextCameraName(sources);
@@ -71,8 +98,6 @@ export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Ele
     await fetchSources();
   };
 
-  // go2rtc's built-in stream page handles all codec negotiation, MSE/WebRTC
-  // fallback, and H.265 support automatically. We embed it via iframe.
   const streamUrl = selected ? `/go2rtc/stream.html?src=${encodeURIComponent(selected)}` : null;
 
   const containerStyle: React.CSSProperties = {
@@ -113,6 +138,27 @@ export function CameraViewer({ serverBase, onBack }: CameraViewerProps): JSX.Ele
         </div>
       ) : (
         <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+          {/* Phone Camera Push */}
+          <div style={{ marginBottom: '16px' }}>
+            <h2 style={{ fontSize: '14px', margin: '0 0 8px' }}>Phone Camera (as webcam)</h2>
+            {!cam.isStreaming ? (
+              <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => cam.start()}>
+                Start Camera
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ color: '#4ade80', fontSize: '13px', marginRight: '8px' }}>Streaming</span>
+                <button type="button" style={btnStyle} onClick={() => cam.switchCamera()}>Flip</button>
+                <button type="button" style={{ ...btnStyle, background: cam.isMuted ? '#dc2626' : '#333' }} onClick={() => cam.toggleMute()}>
+                  {cam.isMuted ? 'Unmute' : 'Mute'}
+                </button>
+                <button type="button" style={{ ...btnStyle, background: '#dc2626' }} onClick={() => cam.stop()}>Stop</button>
+              </div>
+            )}
+            {cam.error && <div style={{ color: '#f87171', fontSize: '12px', marginTop: '4px' }}>{cam.error}</div>}
+          </div>
+
+          {/* Add Camera */}
           <div style={{ marginBottom: '16px' }}>
             <h2 style={{ fontSize: '14px', margin: '0 0 8px' }}>Add Camera</h2>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -152,9 +198,26 @@ RTMP:
             </details>
           </div>
 
+          {/* Camera Sources */}
           <h2 style={{ fontSize: '14px', margin: '0 0 8px' }}>Camera Sources</h2>
-          {sources.length === 0 ? (
-            <p style={{ color: '#888', fontSize: '13px' }}>No cameras configured. Add an RTSP URL above.</p>
+
+          {/* Phone cam - auto appears when live */}
+          {phoneLive && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '8px',
+              padding: '8px 12px', background: '#1a1a1a', borderRadius: '6px', marginBottom: '6px',
+            }}>
+              <span style={{ flex: 1, fontSize: '14px' }}>
+                phone_cam <span style={{ color: '#4ade80', fontSize: '12px', marginLeft: '6px' }}>LIVE</span>
+              </span>
+              <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => setSelected('phone_cam')}>
+                View
+              </button>
+            </div>
+          )}
+
+          {sources.length === 0 && !phoneLive ? (
+            <p style={{ color: '#888', fontSize: '13px' }}>No cameras configured.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {sources.map((s) => (

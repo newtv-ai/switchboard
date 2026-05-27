@@ -3,10 +3,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
-import { CameraPanel } from './CameraPanel.js';
 import { QuickActions } from './QuickActions.js';
 import type { ClientMessage, ServerMessage } from './protocol.js';
-import { HTTP_BASE, WS_BASE } from './ws-url.js';
+import { WS_BASE } from './ws-url.js';
 
 export type TerminalTarget =
   | { kind: 'attach'; sessionId: string }
@@ -385,7 +384,6 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       </header>
       <QuickActions onSend={sendInput} />
       <div ref={containerRef} className="terminal" />
-      <CameraPanel serverBase={HTTP_BASE} />
     </div>
   );
 }

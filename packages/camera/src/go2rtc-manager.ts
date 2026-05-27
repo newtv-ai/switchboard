@@ -50,7 +50,6 @@ export class Go2rtcManager {
     const ready = await this.waitForReady(8000);
     if (ready) {
       this.startHealthCheck();
-      await this.ensurePhoneStream();
       await this.restoreSavedStreams();
     }
     return ready;
@@ -158,9 +157,10 @@ export class Go2rtcManager {
       api: { listen: `:${apiPort}` },
       webrtc: {
         listen: `:${webrtcPort}`,
-        candidates: [`127.0.0.1:${webrtcPort}`],
         ice_servers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-        filters: { loopback: true },
+      },
+      streams: {
+        phone_cam: null,
       },
     });
 
@@ -197,7 +197,7 @@ export class Go2rtcManager {
       const ready = await this.waitForReady(5000);
       if (ready && !this.healthTimer) {
         this.startHealthCheck();
-        await this.ensurePhoneStream();
+        await this.restoreSavedStreams();
       }
     }, delay);
   }
@@ -221,10 +221,6 @@ export class Go2rtcManager {
       await new Promise((r) => setTimeout(r, 200));
     }
     return false;
-  }
-
-  private async ensurePhoneStream(): Promise<void> {
-    await this.addStream('phone_cam', '', false);
   }
 
   private async restoreSavedStreams(): Promise<void> {
