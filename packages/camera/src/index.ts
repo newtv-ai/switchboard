@@ -4,7 +4,6 @@ function redactUrl(url: string): string {
   try {
     const u = new URL(url);
     if (u.password) u.password = '***';
-    if (u.username) u.username = u.username;
     return u.toString();
   } catch {
     return url;

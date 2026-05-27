@@ -1,7 +1,8 @@
-import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer as createHttpServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { Duplex } from 'node:stream';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import react from '@vitejs/plugin-react';
 import forge from 'node-forge';
@@ -28,12 +29,18 @@ function ensureCerts(): { key: string; cert: string } {
   const attrs = [{ name: 'commonName', value: 'switchboard' }];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
-  cert.setExtensions([
-    { name: 'subjectAltName', altNames: [
-      { type: 2, value: 'localhost' },
-      { type: 7, ip: '127.0.0.1' },
-    ]},
-  ]);
+  // Include all LAN IPs so phones on 192.168.x.x don't get cert mismatch
+  const lanIps: Array<{ type: number; value?: string; ip?: string }> = [
+    { type: 2, value: 'localhost' },
+    { type: 7, ip: '127.0.0.1' },
+  ];
+  const nets = networkInterfaces();
+  for (const ifaces of Object.values(nets ?? {})) {
+    for (const i of (ifaces as Array<{ address: string; family: string; internal: boolean }>)) {
+      if (!i.internal && i.family === 'IPv4') lanIps.push({ type: 7, ip: i.address });
+    }
+  }
+  cert.setExtensions([{ name: 'subjectAltName', altNames: lanIps }]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
 
   const keyPem = forge.pki.privateKeyToPem(keys.privateKey);
@@ -51,18 +58,54 @@ const HTTPS_PORT = 5173;
 let actualHttpsPort = HTTPS_PORT;
 let actualHttpPort = HTTP_PORT;
 
-function makeProxyOpts(req: IncomingMessage): RequestOptions {
+function getTargetConfig(req: IncomingMessage): { client: typeof httpRequest | typeof httpsRequest; options: RequestOptions } {
+  const url = req.url || '';
   const headers = { ...req.headers };
-  // Rewrite Host to target HTTPS port to satisfy Vite's host checking
-  headers.host = `127.0.0.1:${actualHttpsPort}`;
-  return {
-    hostname: '127.0.0.1',
-    port: actualHttpsPort,
-    path: req.url,
-    method: req.method,
-    headers: headers,
-    rejectUnauthorized: false,
-  };
+
+  if (url.startsWith('/go2rtc')) {
+    headers.host = '127.0.0.1:1984';
+    if (headers.origin) {
+      headers.origin = 'http://127.0.0.1:1984';
+    }
+    return {
+      client: httpRequest,
+      options: {
+        hostname: '127.0.0.1',
+        port: 1984,
+        path: url.replace(/^\/go2rtc/, ''),
+        method: req.method,
+        headers,
+      }
+    };
+  } else if (url.startsWith('/ws') || url.startsWith('/api')) {
+    headers.host = '127.0.0.1:8787';
+    if (headers.origin) {
+      headers.origin = 'http://127.0.0.1:8787';
+    }
+    return {
+      client: httpRequest,
+      options: {
+        hostname: '127.0.0.1',
+        port: 8787,
+        path: url,
+        method: req.method,
+        headers,
+      }
+    };
+  } else {
+    headers.host = `127.0.0.1:${actualHttpsPort}`;
+    return {
+      client: httpsRequest,
+      options: {
+        hostname: '127.0.0.1',
+        port: actualHttpsPort,
+        path: url,
+        method: req.method,
+        headers,
+        rejectUnauthorized: false,
+      }
+    };
+  }
 }
 
 export default defineConfig({
@@ -78,7 +121,8 @@ export default defineConfig({
           }
           
           const mirror = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-            const proxy = httpsRequest(makeProxyOpts(req), (proxyRes) => {
+            const { client, options } = getTargetConfig(req);
+            const proxy = client(options, (proxyRes) => {
               res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
               proxyRes.pipe(res, { end: true });
             });
@@ -94,7 +138,9 @@ export default defineConfig({
           });
 
           mirror.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-            const proxy = httpsRequest({ ...makeProxyOpts(req), method: 'GET' });
+            const { client, options } = getTargetConfig(req);
+            const upgradeOpts = { ...options, method: 'GET' };
+            const proxy = client(upgradeOpts);
             proxy.on('upgrade', (proxyRes, proxySocket: Duplex, proxyHead: Buffer) => {
               let rawHeaders = `HTTP/1.1 101 ${proxyRes.statusMessage || 'Switching Protocols'}\r\n`;
               for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
@@ -136,10 +182,6 @@ export default defineConfig({
     port: HTTPS_PORT,
     host: '0.0.0.0',
     https: { key: tls.key, cert: tls.cert },
-    hmr: {
-      port: HTTPS_PORT,
-      protocol: 'wss',
-    },
     proxy: {
       '/go2rtc': {
         target: 'http://127.0.0.1:1984',

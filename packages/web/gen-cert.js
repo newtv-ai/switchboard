@@ -27,12 +27,17 @@ cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
 const attrs = [{ name: 'commonName', value: 'switchboard' }];
 cert.setSubject(attrs);
 cert.setIssuer(attrs);
-cert.setExtensions([
-  { name: 'subjectAltName', altNames: [
-    { type: 2, value: 'localhost' },
-    { type: 7, ip: '127.0.0.1' },
-  ]},
-]);
+const os = require('os');
+const lanIps = [
+  { type: 2, value: 'localhost' },
+  { type: 7, ip: '127.0.0.1' },
+];
+for (const ifaces of Object.values(os.networkInterfaces() ?? {})) {
+  for (const i of ifaces) {
+    if (!i.internal && i.family === 'IPv4') lanIps.push({ type: 7, ip: i.address });
+  }
+}
+cert.setExtensions([{ name: 'subjectAltName', altNames: lanIps }]);
 cert.sign(keys.privateKey, forge.md.sha256.create());
 
 writeFileSync(keyPath, forge.pki.privateKeyToPem(keys.privateKey));
