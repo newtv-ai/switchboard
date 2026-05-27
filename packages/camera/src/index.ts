@@ -99,12 +99,14 @@ async function registerProxyRoutes(app: FastifyInstance, manager: Go2rtcManager)
     });
   }
 
-  // Proxy go2rtc static web assets & other APIs (essential for production stream.html access)
+  // Proxy go2rtc static web assets (stream.html etc.) for production.
+  // websocket: false — WS proxy conflicts with @fastify/websocket on /ws.
+  // go2rtc WebSocket signaling goes through Vite proxy in dev mode.
   await app.register(proxy, {
     upstream,
     prefix: '/go2rtc',
     rewritePrefix: '',
-    websocket: true,
+    websocket: false,
     preHandler: authPreHandler,
   });
 
