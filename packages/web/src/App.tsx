@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CameraViewer } from './CameraViewer.js';
 import { SessionList } from './SessionList.js';
 import { type TerminalTarget, TerminalView } from './TerminalView.js';
+import { HTTP_BASE } from './ws-url.js';
 
-type View = { mode: 'list' } | { mode: 'terminal'; target: TerminalTarget };
+type View = { mode: 'list' } | { mode: 'terminal'; target: TerminalTarget } | { mode: 'cameras' };
 
 const VIEW_KEY = 'switchboard:view';
 
@@ -12,6 +14,7 @@ function loadView(): View {
     if (!raw) return { mode: 'list' };
     const parsed = JSON.parse(raw) as View;
     if (parsed?.mode === 'list') return { mode: 'list' };
+    if (parsed?.mode === 'cameras') return parsed;
     if (
       parsed?.mode === 'terminal' &&
       (parsed.target?.kind === 'attach' || parsed.target?.kind === 'create')
@@ -42,6 +45,10 @@ export function App(): JSX.Element {
   // re-running on every parent render (which would tear down xterm + WS).
   const handleBack = useCallback(() => setView({ mode: 'list' }), []);
 
+  if (view.mode === 'cameras') {
+    return <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} />;
+  }
+
   if (view.mode === 'list') {
     return (
       <SessionList
@@ -51,6 +58,7 @@ export function App(): JSX.Element {
         onCreate={(adapterId) =>
           setView({ mode: 'terminal', target: { kind: 'create', adapterId } })
         }
+        onCameras={() => setView({ mode: 'cameras' })}
       />
     );
   }

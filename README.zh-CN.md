@@ -300,6 +300,64 @@ SWITCHBOARD_DEBUG=1 sw                # 服务端
 ### 往上滚能看到重复的横幅 / 状态行（scrollback 污染）
 这是 Claude Code 上游问题，不是 Switchboard 的 bug。Claude Code 使用 [Ink](https://github.com/vadimdemedes/ink)（React-for-CLI），每次状态变化（加载 observations、关闭对话框、SIGWINCH 等）都做全屏重渲染：先发 `ESC[H`（光标回视口原点），再逐行 `ESC[K` 重画。当绘制内容超出视口高度时，多出的行溢出进 scrollback 缓冲区。下一次 `ESC[H` 只能回到当前视口顶部，无法擦除已经推进 scrollback 的旧帧。结果：每次重渲在 scrollback 里沉积一层"残影"，22 次重渲 = 22 份重复。桌面终端往上滚一样能看到，Switchboard 只是让它更明显。上游 issue 见 [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086)、[claude-code#52027](https://github.com/anthropics/claude-code/issues/52027)。**当前缓解措施：** 手机端自动跟随最新输出，正常使用时重复帧不会出现在视野内；终端还支持双模滚动（default 模式下浏览器原生滚动，fullscreen 模式下 PgUp/PgDn 翻译）。欢迎通过 [Issues](https://github.com/newtv-ai/switchboard/issues) 反馈。
 
+### 摄像头模块：添加视频流格式
+
+Cameras 页面支持标准流媒体 URL。常见格式：
+
+**IP 摄像头 (RTSP)**
+```
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/1     # 海康威视 主码流
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/2     # 海康威视 子码流
+rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0  # 大华
+rtsp://admin:password@192.168.1.100:554/stream1                  # 通用 ONVIF
+rtsp://192.168.1.100:8554/mystream                               # RTSP 服务器（无认证）
+```
+
+**HTTP 流**
+```
+http://192.168.1.100:8080/video                                  # MJPEG / HTTP-FLV
+https://example.com/live/stream.m3u8                             # HLS
+```
+
+**RTMP**
+```
+rtmp://192.168.1.100/live/stream
+```
+
+**提示：**
+- 大多数 IP 摄像头 RTSP 端口是 `554`，具体 URL 路径请查看摄像头后台管理页面。
+- 如果主码流带宽太大，用**子码流**（分辨率更低）可以减少占用。
+- 不确定 URL 的话，试试 ONVIF 默认地址：`rtsp://<ip>:554/onvif1`。
+- 添加前建议先用 VLC 测试（`媒体 > 打开网络串流`），确认能播放再添加到 Switchboard。
+
+### 摄像头模块：go2rtc 自动下载失败
+
+摄像头模块（`@switchboard/camera`）首次使用时会从 GitHub Releases 自动下载 [go2rtc](https://github.com/AlexxIT/go2rtc)。如果你的网络无法访问 GitHub（国内常见），可以手动安装：
+
+1. 从镜像站或其他机器下载对应平台的二进制：
+   - Windows x64: `go2rtc_win64.zip`
+   - macOS Apple Silicon: `go2rtc_mac_arm64.zip`
+   - macOS Intel: `go2rtc_mac_amd64.zip`
+   - Linux x64: `go2rtc_linux_amd64`
+   - Linux ARM64: `go2rtc_linux_arm64`
+
+   官方发布页: https://github.com/AlexxIT/go2rtc/releases
+
+2. 解压并放到指定位置：
+   ```bash
+   # Windows — 把 go2rtc.exe 放到：
+   %USERPROFILE%\.switchboard\bin\go2rtc.exe
+
+   # macOS / Linux — 解压后赋予执行权限：
+   mkdir -p ~/.switchboard/bin
+   # （把 go2rtc 二进制复制到这里）
+   chmod +x ~/.switchboard/bin/go2rtc
+   ```
+
+3. 也可以把 `go2rtc` 放到系统 PATH 中的任意目录。
+
+4. 重启 server，日志中应该能看到 `[camera] module loaded`。
+
 ## 项目结构
 
 ```

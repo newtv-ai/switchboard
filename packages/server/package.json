@@ -35,6 +35,6 @@
     "clean": true,
     "sourcemap": true,
     "target": "node18",
-    "external": ["node-pty"]
+    "external": ["node-pty", "@switchboard/camera"]
   }
 }

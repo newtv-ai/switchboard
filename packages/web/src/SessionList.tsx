@@ -6,11 +6,12 @@ import { WS_BASE } from './ws-url.js';
 export interface SessionListProps {
   onAttach(sessionId: string): void;
   onCreate(adapterId: string): void;
+  onCameras?(): void;
 }
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error';
 
-export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Element {
+export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps): JSX.Element {
   const [conn, setConn] = useState<ConnState>('connecting');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [showFileManager, setShowFileManager] = useState(false);
@@ -56,6 +57,11 @@ export function SessionList({ onAttach, onCreate }: SessionListProps): JSX.Eleme
       <header>
         <h1>Switchboard</h1>
         <span className={`status status-${conn}`}>{conn}</span>
+        {onCameras && (
+          <button type="button" className="btn btn-files" onClick={onCameras}>
+            Cameras
+          </button>
+        )}
         <button type="button" className="btn btn-files" onClick={() => setShowFileManager(true)}>
           Upload
         </button>

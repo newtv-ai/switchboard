@@ -1,0 +1,38 @@
+{
+  "name": "@switchboard/camera",
+  "version": "0.1.0",
+  "description": "Bidirectional camera streaming via go2rtc sidecar.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/http-proxy": "^9.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "fastify": "^4.28.1",
+    "tsup": "^8.3.5"
+  },
+  "tsup": {
+    "entry": ["src/index.ts"],
+    "format": ["esm"],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "node18",
+    "external": ["fastify", "@fastify/http-proxy"]
+  }
+}

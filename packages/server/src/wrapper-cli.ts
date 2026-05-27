@@ -1,6 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename as pathBasename } from 'node:path';
+import { join, basename as pathBasename } from 'node:path';
 import * as nodePty from 'node-pty';
 import WebSocket from 'ws';
 import { resolveCommand } from '@switchboard/core';

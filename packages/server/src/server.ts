@@ -152,6 +152,20 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
 
   app.get('/sessions', async () => sessions.list());
 
+  // --- Optional camera module (go2rtc sidecar) ---
+  try {
+    const cam = await import('@switchboard/camera');
+    const camMod = await cam.register(app);
+    if (camMod.directions.phoneToDesktop || camMod.directions.desktopToPhone) {
+      app.log.info('[camera] module loaded — endpoints at /api/camera/*');
+    }
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') {
+      app.log.error('[camera] failed to load: %s', (err as Error).message);
+    }
+  }
+
   // Browser/phone clients attach here.
   app.get('/ws', { websocket: true }, (socket) => {
     bindWebSocket(socket, sessions);

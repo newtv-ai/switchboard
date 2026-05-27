@@ -12,6 +12,11 @@ export default defineConfig({
     // happens to work via IPv6/dual-stack.
     host: '0.0.0.0',
     proxy: {
+      '/go2rtc': {
+        target: 'http://127.0.0.1:1984',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/go2rtc/, ''),
+      },
       '/api': 'http://127.0.0.1:8787',
     },
   },

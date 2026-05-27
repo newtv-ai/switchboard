@@ -300,6 +300,64 @@ SWITCHBOARD_DEBUG=1 sw                # server side
 ### Scrolling up shows duplicate banners / status lines (scrollback pollution)
 This is a known upstream issue, not a Switchboard bug. Claude Code uses [Ink](https://github.com/vadimdemedes/ink) (React-for-CLI), which performs full-screen re-renders on every state change (loading observations, dismissing dialogs, SIGWINCH, etc.). Each re-render sends `ESC[H` (cursor to viewport origin) then redraws every line with `ESC[K`. When the drawn content exceeds the viewport height, the excess overflows into the scrollback buffer. The next `ESC[H` can only reach the current viewport top -- it cannot erase the overflow already pushed into scrollback. Result: each re-render deposits one "ghost frame" in scrollback. 22 re-renders = 22 duplicates. The same artifacts exist on a desktop terminal if you scroll up; Switchboard simply makes them more visible. See [claude-code#49086](https://github.com/anthropics/claude-code/issues/49086), [claude-code#52027](https://github.com/anthropics/claude-code/issues/52027) for upstream reports. **Current mitigation:** the mobile web client auto-scrolls to the latest output so duplicate frames stay out of sight during normal use; the terminal also supports dual-mode scroll handling (native browser scroll in default mode, PgUp/PgDn translation in fullscreen mode). Feedback welcome via [Issues](https://github.com/newtv-ai/switchboard/issues).
 
+### Camera module: adding video streams
+
+The Cameras page accepts standard streaming URLs. Common formats:
+
+**IP cameras (RTSP)**
+```
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/1     # Hikvision main stream
+rtsp://admin:password@192.168.1.100:554/Streaming/Channels/2     # Hikvision sub stream
+rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0  # Dahua
+rtsp://admin:password@192.168.1.100:554/stream1                  # generic ONVIF
+rtsp://192.168.1.100:8554/mystream                               # RTSP server (no auth)
+```
+
+**HTTP streams**
+```
+http://192.168.1.100:8080/video                                  # MJPEG / HTTP-FLV
+https://example.com/live/stream.m3u8                             # HLS
+```
+
+**RTMP**
+```
+rtmp://192.168.1.100/live/stream
+```
+
+**Tips:**
+- Most IP cameras use port `554` for RTSP. Check your camera's admin page for the exact URL path.
+- Use the **sub stream** (lower resolution) to reduce bandwidth if the main stream is too heavy.
+- If unsure about the URL, try your camera's ONVIF address: `rtsp://<ip>:554/onvif1`.
+- Test the URL with VLC first (`Media > Open Network Stream`) to confirm it works before adding to Switchboard.
+
+### Camera module: go2rtc fails to download automatically
+
+The camera module (`@switchboard/camera`) auto-downloads [go2rtc](https://github.com/AlexxIT/go2rtc) from GitHub Releases on first use. If you're behind a firewall that blocks GitHub (common in mainland China), you can install it manually:
+
+1. Download the correct binary for your platform from a mirror or another machine:
+   - Windows x64: `go2rtc_win64.zip`
+   - macOS Apple Silicon: `go2rtc_mac_arm64.zip`
+   - macOS Intel: `go2rtc_mac_amd64.zip`
+   - Linux x64: `go2rtc_linux_amd64`
+   - Linux ARM64: `go2rtc_linux_arm64`
+
+   Official releases: https://github.com/AlexxIT/go2rtc/releases
+
+2. Extract and place the binary:
+   ```bash
+   # Windows — extract go2rtc.exe to:
+   %USERPROFILE%\.switchboard\bin\go2rtc.exe
+
+   # macOS / Linux — extract and chmod:
+   mkdir -p ~/.switchboard/bin
+   # (copy go2rtc binary here)
+   chmod +x ~/.switchboard/bin/go2rtc
+   ```
+
+3. Alternatively, put `go2rtc` anywhere on your system PATH.
+
+4. Restart the server. You should see `[camera] module loaded` in the logs.
+
 ## Project layout
 
 ```
