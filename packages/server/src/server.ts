@@ -37,9 +37,19 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   sessions.registerAdapter(codexAdapter);
   sessions.registerAdapter(antigravityAdapter);
 
+  // Auto-detect HTTPS: if certs/key.pem + cert.pem exist, serve HTTPS
+  const certsDir = path.join(moduleDir, '..', '..', '..', 'certs');
+  const keyPath = path.join(certsDir, 'key.pem');
+  const certPath = path.join(certsDir, 'cert.pem');
+  const hasHttps = fs.existsSync(keyPath) && fs.existsSync(certPath);
+  const httpsOpts = hasHttps
+    ? { key: fs.readFileSync(keyPath, 'utf8'), cert: fs.readFileSync(certPath, 'utf8') }
+    : undefined;
+
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL ?? 'info' },
-    bodyLimit: 100 * 1024 * 1024, // 100MB limit to easily accommodate 5MB chunks
+    bodyLimit: 100 * 1024 * 1024,
+    ...(httpsOpts ? { https: httpsOpts } : {}),
   });
 
   await app.register(fastifyWebsocket);
@@ -190,7 +200,8 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
 
   await app.listen({ host, port });
 
-  const url = `http://${host}:${port}`;
+  const proto = hasHttps ? 'https' : 'http';
+  const url = `${proto}://${host}:${port}`;
 
   const close = async (): Promise<void> => {
     await sessions.killAll();
