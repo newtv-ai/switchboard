@@ -399,11 +399,11 @@ rtmp://192.168.1.100/live/stream
 
 ## 告警通知（跌倒检测）
 
-当外部检测器触发告警时，Switchboard 能给手机推一条 **Web Push** 通知——为 [falldown-cascade](https://github.com/) 跌倒检测而做，但任何告警源都能 POST 这个 webhook。**即使 PWA 关着**，手机也会响、会震；点通知直接跳到摄像头页。
+当外部检测器触发告警时，Switchboard 能给手机推一条 **Web Push** 通知——为跌倒检测而做，但任何告警源都能 POST 这个 webhook。**即使 PWA 关着**，手机也会响、会震；点通知直接跳到摄像头页。
 
 **原理：** 检测器发 `POST /api/alarm`；Switchboard 用自己的 VAPID 密钥签一条 Web Push，交给浏览器厂商的推送服务（Android/Chrome 走 FCM、iOS 走 APNs），由它唤醒手机上 PWA 的 Service Worker。不需要厂商账号——VAPID 密钥首次启动自动生成到 `certs/vapid-keys.json`。
 
-**目前只有一种告警——跌倒。** `/api/alarm` 是唯一的接入点,而且**任何** POST 都产生同一条"检测到跌倒"通知:那些 JSON 字段全是可选的、只用于打日志(handler 不按类型分支),通知时间用的是**服务器收到的时刻**(不是 payload 里的视频偏移),同一 `track_id` 的重复告警通过通知 `tag` 合并。要接真正的检测器,把 [falldown-cascade](https://github.com/) 或你自己的脚本指向 `http://<host>:8787/api/alarm` 即可(服务器到服务器,纯 HTTP 没问题)。设了 `SWITCHBOARD_ALARM_SECRET` 时,对 **raw request body** 做 HMAC-SHA256,作为 `X-Falldown-Signature: sha256=<hex>` 头发过来。**想要别的告警类型?** 通知文案只在一处生成——`packages/server/src/alarm-handler.ts`——让上游在 POST 里带个 `alarm_type` 标签、在那里用上即可(例如 `检测到${alarm.alarm_type ?? '跌倒'}`)。本项目只内置"跌倒"这一种;转发其他类型(以及按类型区分图标/铃声)就几行,自己接。
+**通知内容由上游决定。** `/api/alarm` 是唯一的接入点;POST body 里可选的 `alarm_type` 字段*就是*要显示的告警——传 `{"alarm_type":"暴力"}`,手机就显示"检测到暴力,点击查看";不传则默认 **跌倒**(所以不传它的检测器照常能用;`alarm_type` 服务端会 trim 并限长)。body 里其余字段都是可选、仅打日志;通知时间用**服务器收到的时刻**(不是 payload 里的视频偏移),同 `<alarm_type>-<track_id>` 的重复告警通过通知 `tag` 合并。要接真正的检测器,把你的检测器或任意脚本指向 `http://<host>:8787/api/alarm` 即可(服务器到服务器,纯 HTTP 没问题)。设了 `SWITCHBOARD_ALARM_SECRET` 时,对 **raw request body** 做 HMAC-SHA256,作为 `X-Falldown-Signature: sha256=<hex>` 头发过来。*想按类型区分图标/铃声:改 `packages/server/src/alarm-handler.ts` 里那一处生成通知的代码即可。生产环境的时效性告警,建议把推送发成 high 优先级 + 短 TTL(默认是 normal 优先级 / 长 TTL)——`broadcast()` 在 `packages/server/src/push.ts`。*
 
 ### HTTPS：哪些环节需要
 

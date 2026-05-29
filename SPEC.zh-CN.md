@@ -501,7 +501,7 @@ switchboard/
 5. **版本号**：每次有意义的变更在本文顶部递增版本。v0.x = 预发布，v1.0 = 首次 npm 发布。
 
 ### 近期变更
-- 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器（如 falldown-cascade），与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。
+- 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。
 - 2026-05-23 — v0.9 — **Phase 2 闸门通过**：跨手机 + 桌面的多客户端实地测试通过。Wrapper 在 headless 跑（没有本地 TTY）时尊重服务端驱动的 resize，所以后台 wrapper 正确采纳浏览器协商的 PTY 尺寸。快捷操作栏在 ≥ 600px 视口（有物理键盘）下隐藏。
 - 2026-05-23 — v0.8 — **多客户端会话尺寸**：`Session.attach()` 返回 `ClientHandle`；逐客户端跟踪视口；PTY 在所有 attach 客户端上 refit 到 `min(cols)` + `min(rows)`。修了"桌面视图在手机最后 attach 时变窄"和"手机在桌面也 attach 时看不到输入提示"两个问题。
 - 2026-05-23 — v0.7 — **Phase 2 手机可用性修复**（从 Phase 5 提前）：visualViewport 驱动的 `--app-h` 实现键盘感知布局；快捷操作栏（Esc/Tab/⇧Tab/方向键/Ctrl+C）让 TUI 导航无需硬件键盘。

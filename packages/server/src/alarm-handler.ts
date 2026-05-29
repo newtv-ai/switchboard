@@ -14,7 +14,10 @@ export interface AlarmDeps {
   alarmSecret?: string;
 }
 
-/** Shape of the JSON falldown-cascade POSTs. All fields optional — we only log them. */
+/**
+ * Shape of the JSON an alarm source POSTs. All fields optional; only `alarm_type`
+ * shapes the notification text — the rest are logged for debugging.
+ */
 interface AlarmPayload {
   event?: string;
   timestamp?: number;
@@ -25,6 +28,8 @@ interface AlarmPayload {
   stgcn_action?: string | null;
   stgcn_fall_prob?: number;
   source?: string;
+  /** Human label to show, e.g. "跌倒" / "暴力". Omitted → defaults to "跌倒". */
+  alarm_type?: string;
 }
 
 interface IncomingSubscription {
@@ -34,7 +39,7 @@ interface IncomingSubscription {
 
 /**
  * Registers the fall-alarm webhook and the PWA push-subscription endpoints:
- *   POST /api/alarm            ← falldown-cascade (or any source) fires here
+ *   POST /api/alarm            ← the detector (or any source) fires here
  *   GET  /api/vapid-public-key → PWA reads the key before subscribing
  *   POST /api/push-subscribe   ← PWA registers its PushSubscription
  *   POST /api/push-unsubscribe ← PWA drops it when the user toggles alarms off
@@ -119,16 +124,22 @@ export function registerAlarm(app: FastifyInstance, deps: AlarmDeps): void {
 
       const alarm = (req.body ?? {}) as AlarmPayload;
       req.log.info(
-        `alarm: event=${alarm.event} track=${alarm.track_id} action=${alarm.stgcn_action} prob=${alarm.stgcn_fall_prob} source=${alarm.source}`,
+        `alarm: type=${alarm.alarm_type} event=${alarm.event} track=${alarm.track_id} action=${alarm.stgcn_action} prob=${alarm.stgcn_fall_prob} source=${alarm.source}`,
       );
 
+      // The notification label is whatever the upstream sends in `alarm_type`
+      // (e.g. "跌倒", "暴力"); fall back to "跌倒" so a detector that omits the
+      // field keeps working. Trim + cap so a bad upstream
+      // can't push a giant string into the notification.
+      const raw = typeof alarm.alarm_type === 'string' ? alarm.alarm_type : '';
+      const label = raw.trim().slice(0, 24) || '跌倒';
       // alarm.timestamp is a VIDEO offset (seconds), not wall-clock — use the
       // server's receive time for the human-facing notification instead.
       const payload = {
-        title: '检测到跌倒',
-        body: `${new Date().toLocaleTimeString()} 摄像头检测到跌倒，点击查看`,
+        title: `检测到${label}`,
+        body: `${new Date().toLocaleTimeString()} 摄像头检测到${label}，点击查看`,
         url: '/?view=camera',
-        tag: `fall-${alarm.track_id ?? 'x'}`,
+        tag: `${label}-${alarm.track_id ?? 'x'}`,
         renotify: true,
       };
       const result = await push.broadcast(payload);
