@@ -7,7 +7,7 @@
 [![Plugin API](https://img.shields.io/badge/plugin%20API-public-purple.svg)](./packages/sdk)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-LAN%20%2F%20Tailscale-brightgreen.svg)](#手机访问局域网--tailscale)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](https://nodejs.org)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](./SPEC.md)
+[![Status](https://img.shields.io/badge/status-1.0.0-brightgreen.svg)](./SPEC.md)
 
 🌐 **语言**: [English](./README.md) · 中文
 
@@ -34,6 +34,7 @@
 - [手机访问（局域网 / Tailscale）](#手机访问局域网--tailscale)
 - [文件互传（手机 ↔ 开发机）](#文件互传手机--开发机)
 - [摄像头（手机当摄像头 + 远程查看摄像头）](#摄像头手机当摄像头--远程查看摄像头)
+- [告警通知（跌倒检测）](#告警通知跌倒检测)
 - [防火墙——开端口](#防火墙开端口)
 - [支持的 agent](#支持的-agent)
 - [FAQ](#faq)
@@ -395,6 +396,86 @@ rtmp://192.168.1.100/live/stream
 3. 也可以把 `go2rtc` 放到系统 PATH 中的任意目录。
 
 4. 重启 server，日志中应该能看到 `[camera] module loaded`。
+
+## 告警通知（跌倒检测）
+
+当外部检测器触发告警时，Switchboard 能给手机推一条 **Web Push** 通知——为 [falldown-cascade](https://github.com/) 跌倒检测而做，但任何告警源都能 POST 这个 webhook。**即使 PWA 关着**，手机也会响、会震；点通知直接跳到摄像头页。
+
+**原理：** 检测器发 `POST /api/alarm`；Switchboard 用自己的 VAPID 密钥签一条 Web Push，交给浏览器厂商的推送服务（Android/Chrome 走 FCM、iOS 走 APNs），由它唤醒手机上 PWA 的 Service Worker。不需要厂商账号——VAPID 密钥首次启动自动生成到 `certs/vapid-keys.json`。
+
+**目前只有一种告警——跌倒。** `/api/alarm` 是唯一的接入点,而且**任何** POST 都产生同一条"检测到跌倒"通知:那些 JSON 字段全是可选的、只用于打日志(handler 不按类型分支),通知时间用的是**服务器收到的时刻**(不是 payload 里的视频偏移),同一 `track_id` 的重复告警通过通知 `tag` 合并。要接真正的检测器,把 [falldown-cascade](https://github.com/) 或你自己的脚本指向 `http://<host>:8787/api/alarm` 即可(服务器到服务器,纯 HTTP 没问题)。设了 `SWITCHBOARD_ALARM_SECRET` 时,对 **raw request body** 做 HMAC-SHA256,作为 `X-Falldown-Signature: sha256=<hex>` 头发过来。**想要别的告警类型?** 通知文案只在一处生成——`packages/server/src/alarm-handler.ts`——让上游在 POST 里带个 `alarm_type` 标签、在那里用上即可(例如 `检测到${alarm.alarm_type ?? '跌倒'}`)。本项目只内置"跌倒"这一种;转发其他类型(以及按类型区分图标/铃声)就几行,自己接。
+
+### HTTPS：哪些环节需要
+
+只有碰到**手机浏览器**的那一段要 HTTPS——这是浏览器硬性规定（Service Worker + Push API 只在「安全上下文」可用），不是 Switchboard 的选择：
+
+| 环节 | 要 HTTPS 吗 |
+|---|---|
+| 手机开启告警 / 打开 PWA / 注册 Service Worker | **必须。** 用 `https://<ip>:5173`，**不要**用 HTTP 的 `:5174`。（`http://localhost` 也算安全上下文，但那只对开发机本机有效——手机按 IP 访问你不算 localhost。） |
+| 检测器发的 webhook `POST /api/alarm` | **不需要**——这是服务器到服务器调用。可信局域网里用纯 `http://<host>:8787/api/alarm` 即可。 |
+| 发推 / 手机收推 | 不涉及——走 FCM/APNs 的 OS 推送通道，和手机怎么连你的服务器无关。订阅成功后即使关 APP 也能收到。 |
+
+> **受信任证书的注意点：** 自动生成的是自签证书，浏览器会标记"不安全"。**Android Chrome** 点过"继续访问"接受后即可用；**iOS Safari 更严**——只在*受信任*证书下才注册 Service Worker。拿到受信任证书跟你用哪种虚拟内网无关（Tailscale / ZeroTier / Nebula / WireGuard / 纯局域网都一样），两条路：**(a)** 在设备上安装并信任这个自签 CA（iOS：设置 → 通用 → VPN与设备管理；Android：设置 → 安全 → 安装 CA 证书），或 **(b)** 给手机访问的那个域名挂一个真正受信任的证书——比如 `tailscale cert`（`*.ts.net`），或你自己的域名 + 反向代理上的 Let's Encrypt。
+
+> **可达性（被墙 / 没有 Google 服务的网络）：** 在 Android 上，**Chrome 和 Firefox 的 Web Push 最终都经由 Google FCM 投递**——Firefox 安卓版同样是通过 Firebase 桥接的（[Mozilla 源码](https://firefox-source-docs.mozilla.org/dom/push/index.html)），所以换浏览器并不能绕开。如果手机连不上 Google（如中国大陆）或设备没有 Google Play 服务，订阅会成功，但推送会**静默地永远收不到**。解决办法：把手机流量导到一个能连上 FCM 的节点——比如在墙外的 VPS 上开一个 [Tailscale 出口节点](#手机访问局域网--tailscale)（VPS 上跑 `tailscale up --advertise-exit-node`，到管理后台批准它，再在手机 Tailscale App 里选它当 **Exit Node / 出口节点**），或者用任意 VPN——而且只要还想收告警,它就得**一直开着**:Web Push 走的是持久连接,告警触发那一刻如果手机到 FCM 的线路是断的,这条要等线路恢复后才可能到(而迟到的跌倒告警没意义)。**iOS 不一样：** Safari 的 PWA 推送走 Apple 的 **APNs**，它在中国大陆**是可达的**，所以 iPhone 一般不用出口节点就能收（仍需上面说的受信任证书）。国内厂商推送（华为 HMS / 小米 MiPush / vivo·OPPO Push）是给**原生 App 用厂商 SDK** 的通道，**不是**浏览器标准 Web Push 的路子。**服务器**这端同样需要在**告警触发的那一刻**(不只是配置时)有自己能通到 FCM/APNs 的线路才能发推。
+
+**在手机上开启：**
+
+1. 打开 `https://<电脑IP>:5173`（或你的 Tailscale `https://…ts.net` 地址）。**iOS 必须先「添加到主屏幕」**（Safari 16.4+）；Android Chrome 在普通标签页里就行。
+2. 点首页的 **🔕 告警** 铃铛 → 允许通知。变成 **🔔 告警开** 即成功。
+
+**不用真摔也能测**（服务器在跑、未配 secret 时）：
+
+```bash
+curl -X POST http://localhost:8787/api/alarm \
+  -H 'content-type: application/json' \
+  -d '{"event":"fall_alarm","track_id":1,"stgcn_action":"Fall Down","stgcn_fall_prob":0.7,"source":"manual-test/1"}'
+```
+
+手机应该立刻响一下、震一下。
+
+**服务端配置（环境变量）：**
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `SWITCHBOARD_ALARM_SECRET` | _(不设)_ | 设了之后，`/api/alarm` 要求带合法的 `X-Falldown-Signature: sha256=<hmac>`（对 raw body 做 HMAC-SHA256）。**服务暴露到局域网之外时强烈建议配**（如 Tailscale Funnel）；纯局域网可不设。 |
+| `SWITCHBOARD_VAPID_CONTACT` | `admin@example.com` | VAPID 里嵌的联系标识（协议要求，就是个标识）。 |
+
+> Web Push 的传输始终经过厂商推送服务（FCM/APNs）——服务器需要能出公网才能发推。payload 端到端加密、也不用注册厂商账号，但传输层面不是字面意义的「零云」。
+
+### 受信任、自动续期的 HTTPS 证书（给 iOS / 去掉警告）
+
+iOS Safari 只在*受信任*证书下才会注册 Service Worker，而自签证书在别处也到处弹警告。如果你的开发机在 Tailscale 上并[启用了 HTTPS](https://tailscale.com/kb/1153/enabling-https)，Switchboard 自带一个脚本来拉取并续期真正的 `*.ts.net` 证书：
+
+```bash
+node packages/web/refresh-cert.js   # 写入 certs/tailscale.{crt,key}；证书还新鲜时是空操作
+```
+
+然后让开发服务器用它——下面两个环境变量**优先于**自签证书，而且 Vite 会**每 12 小时热替换证书**，续期后无需重启 server 即可生效：
+
+```powershell
+# Windows（持久化为用户环境变量；用绝对路径）
+setx SWITCHBOARD_TLS_CERT "<repo>\certs\tailscale.crt"
+setx SWITCHBOARD_TLS_KEY  "<repo>\certs\tailscale.key"
+```
+
+```bash
+# Linux / macOS
+export SWITCHBOARD_TLS_CERT=<repo>/certs/tailscale.crt
+export SWITCHBOARD_TLS_KEY=<repo>/certs/tailscale.key
+```
+
+`refresh-cert.js` 是尽力而为的——从不抛错、永远 exit 0，Tailscale 没运行或 tailnet 没开 HTTPS 时会安静跳过。Tailscale 自己会在临近过期时续期；把这个脚本挂到计划任务上，续好的证书就能无人值守地落到磁盘：
+
+```powershell
+# Windows —— 每周计划任务（也可用任务计划程序 GUI）
+schtasks /create /tn "Switchboard cert renew" /sc weekly /tr "node <repo>\packages\web\refresh-cert.js" /f
+```
+
+```bash
+# Linux / macOS —— 每周 cron
+0 4 * * 0  node <repo>/packages/web/refresh-cert.js
+```
 
 ## 项目结构
 

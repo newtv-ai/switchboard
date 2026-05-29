@@ -7,7 +7,7 @@
 [![Plugin API](https://img.shields.io/badge/plugin%20API-public-purple.svg)](./packages/sdk)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-LAN%20%2F%20Tailscale-brightgreen.svg)](#phone-access-lan--tailscale)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](https://nodejs.org)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](./SPEC.md)
+[![Status](https://img.shields.io/badge/status-1.0.0-brightgreen.svg)](./SPEC.md)
 
 🌐 **Languages**: English · [中文](./README.zh-CN.md)
 
@@ -34,6 +34,7 @@
 - [Phone access (LAN / Tailscale)](#phone-access-lan--tailscale)
 - [File transfer (phone ↔ dev box)](#file-transfer-phone--dev-box)
 - [Camera (phone as webcam + remote camera viewer)](#camera-phone-as-webcam--remote-camera-viewer)
+- [Alarm notifications (fall detection)](#alarm-notifications-fall-detection)
 - [Firewall — opening the port](#firewall--opening-the-port)
 - [Supported agents](#supported-agents)
 - [FAQ](#faq)
@@ -270,6 +271,86 @@ The camera module auto-downloads [go2rtc](https://github.com/AlexxIT/go2rtc) fro
 3. Alternatively, put `go2rtc` anywhere on your system PATH.
 
 4. Restart the server. You should see `[camera] module loaded` in the logs.
+
+## Alarm notifications (fall detection)
+
+Switchboard can push a **Web Push** notification to your phone when an external detector fires an alarm — built for [falldown-cascade](https://github.com/) fall detection, but any source can POST the webhook. Your phone buzzes and rings **even when the PWA is closed**; tap the notification to jump straight to the camera page.
+
+**How it works:** a detector sends `POST /api/alarm`; Switchboard signs a Web Push with its own VAPID keys and hands it to the browser vendor's push service (FCM on Android/Chrome, APNs on iOS), which wakes the PWA's service worker on your phone. No vendor account — VAPID keys are auto-generated on first start into `certs/vapid-keys.json`.
+
+**One alarm type today — fall.** `/api/alarm` is the single integration point, and *every* POST produces the same "fall detected" notification: the JSON fields are all optional and only logged (the handler doesn't branch on them), the notification is stamped with the server's **receive time** (not the payload's video offset), and repeat alarms for the same `track_id` collapse via the notification `tag`. To wire a real detector, point [falldown-cascade](https://github.com/) — or any script — at `http://<host>:8787/api/alarm` (plain HTTP is fine server-to-server). When `SWITCHBOARD_ALARM_SECRET` is set, HMAC-SHA256 the **raw request body** and send it as `X-Falldown-Signature: sha256=<hex>`. **Other alarm types?** The notification text is built in one place — `packages/server/src/alarm-handler.ts` — so have your upstream include an `alarm_type` label and use it there (e.g. `检测到${alarm.alarm_type ?? '跌倒'}`). This project ships only the fall case; relaying other types (and per-type icons/sounds) is a few lines you wire yourself.
+
+### HTTPS: which parts need it
+
+Only the part that touches the **phone's browser** requires HTTPS — it's a hard browser rule (Service Worker + Push API only work in a "secure context"), not a Switchboard choice:
+
+| Leg | HTTPS? |
+|---|---|
+| Phone enabling alarms / opening the PWA / service-worker registration | **Required.** Use `https://<ip>:5173`, **not** the HTTP `:5174` port. (`http://localhost` is also a secure context, but that only helps the dev box itself — a phone reaching you by IP is not localhost.) |
+| The webhook `POST /api/alarm` from your detector | **Not required** — it's a server-to-server call. Plain `http://<host>:8787/api/alarm` is fine on a trusted LAN. |
+| Sending the push / the phone receiving it | N/A — goes through FCM/APNs over the OS push channel, independent of how the phone reached your server. Works once subscribed, even with the app closed. |
+
+> **Trusted-cert caveat:** the auto-generated cert is self-signed, so browsers flag it. **Android Chrome** works once you accept the warning. **iOS Safari is stricter** — it only registers a service worker behind a *trusted* cert. Getting one is independent of which VLAN you use (Tailscale, ZeroTier, Nebula, WireGuard, plain LAN, …): either **(a)** install + trust the self-signed CA on the device (iOS: Settings → General → VPN & Device Management; Android: Settings → Security → install a CA certificate), or **(b)** put a genuinely-trusted cert in front for whatever hostname the phone uses — e.g. `tailscale cert` for a `*.ts.net` name, or your own domain + Let's Encrypt behind a reverse proxy.
+
+> **Reachability (censored networks / no Google Play):** On Android, **both Chrome and Firefox deliver Web Push through Google FCM** — Firefox for Android bridges via Firebase too ([Mozilla source](https://firefox-source-docs.mozilla.org/dom/push/index.html)), so switching browser doesn't dodge it. If the phone can't reach Google (e.g. mainland China) or has no Google Play Services, the subscription still succeeds but pushes silently never arrive. Fix: route the phone through a node that *can* reach FCM — e.g. a [Tailscale exit node](#phone-access-lan--tailscale) on a VPS outside the blocked region (`tailscale up --advertise-exit-node` on the VPS, approve it in the admin console, then pick it as **Exit Node** in the phone's Tailscale app) — or any VPN — and it must stay **on** whenever an alarm could fire: Web Push rides a persistent connection, so an alarm that fires while the phone's route to FCM is down won't arrive until that route is back (and a late fall alarm is useless). **iOS is different:** Safari PWA push uses Apple **APNs**, which *is* reachable inside mainland China, so iPhones generally work without an exit node (they still need the trusted cert above). Chinese OEM push (Huawei HMS / Xiaomi MiPush / vivo·OPPO Push) is a native-app SDK channel, **not** a path for standard browser Web Push. The **server** also needs its own outbound reach to FCM/APNs **at the moment an alarm fires** (not just during setup) to send.
+
+**Enable on your phone:**
+
+1. Open `https://<your-ip>:5173` (or your Tailscale `https://…ts.net` URL). On **iOS, "Add to Home Screen" first** (Safari 16.4+); Android Chrome works in a normal tab.
+2. Tap the **🔕 告警** bell on the home screen → allow notifications. It becomes **🔔 告警开**.
+
+**Test without a real fall** (server running, no alarm secret set):
+
+```bash
+curl -X POST http://localhost:8787/api/alarm \
+  -H 'content-type: application/json' \
+  -d '{"event":"fall_alarm","track_id":1,"stgcn_action":"Fall Down","stgcn_fall_prob":0.7,"source":"manual-test/1"}'
+```
+
+Your phone should buzz immediately.
+
+**Server config (env vars):**
+
+| Var | Default | Purpose |
+|---|---|---|
+| `SWITCHBOARD_ALARM_SECRET` | _(unset)_ | When set, `/api/alarm` requires a valid `X-Falldown-Signature: sha256=<hmac>` (HMAC-SHA256 of the raw body). **Strongly recommended when the server is exposed beyond the LAN** (e.g. Tailscale Funnel); leave unset for pure-LAN. |
+| `SWITCHBOARD_VAPID_CONTACT` | `admin@example.com` | Contact identifier embedded in VAPID (protocol requirement; just an identifier). |
+
+> Web Push transport always transits the vendor's push service (FCM/APNs) — the server needs outbound internet to send. The payload is end-to-end encrypted and there's no vendor account, but it isn't "zero cloud" in the transport sense.
+
+### Trusted, auto-renewing HTTPS cert (for iOS / no warnings)
+
+iOS Safari only registers the service worker behind a *trusted* cert, and the self-signed pair trips warnings everywhere else. If your dev box is on Tailscale with [HTTPS enabled](https://tailscale.com/kb/1153/enabling-https), Switchboard ships a helper that fetches and renews a real `*.ts.net` cert:
+
+```bash
+node packages/web/refresh-cert.js   # writes certs/tailscale.{crt,key}; a no-op while the cert is still fresh
+```
+
+Then point the dev server at it — these two env vars take **priority** over the self-signed pair, and Vite **hot-swaps the cert every 12 h**, so a renewal applies without restarting the server:
+
+```powershell
+# Windows (persist as user env vars; use absolute paths)
+setx SWITCHBOARD_TLS_CERT "<repo>\certs\tailscale.crt"
+setx SWITCHBOARD_TLS_KEY  "<repo>\certs\tailscale.key"
+```
+
+```bash
+# Linux / macOS
+export SWITCHBOARD_TLS_CERT=<repo>/certs/tailscale.crt
+export SWITCHBOARD_TLS_KEY=<repo>/certs/tailscale.key
+```
+
+`refresh-cert.js` is best-effort — it never throws and always exits 0, skipping quietly if Tailscale isn't running or the tailnet hasn't enabled HTTPS. Tailscale renews the cert near expiry on its own; run the helper on a schedule so the fresh cert lands on disk unattended:
+
+```powershell
+# Windows — weekly Scheduled Task (or use the Task Scheduler GUI)
+schtasks /create /tn "Switchboard cert renew" /sc weekly /tr "node <repo>\packages\web\refresh-cert.js" /f
+```
+
+```bash
+# Linux / macOS — weekly cron
+0 4 * * 0  node <repo>/packages/web/refresh-cert.js
+```
 
 ## Firewall — opening the port
 

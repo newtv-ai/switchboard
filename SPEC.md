@@ -2,7 +2,7 @@
 
 > **One phone, every AI coding CLI.** Self-hostable web app + plugin-based adapter system + native PTY relay. This document is the design source of truth.
 >
-> **Status**: Draft v0.9 · Last updated: 2026-05-23 · Phase 1 ✅ · Phase 2 ✅ · Phase 3 next
+> **Status**: v1.0.0 · Last updated: 2026-05-29 · Phase 1 ✅ · Phase 2 ✅ · Phase 3 next
 > **This document is the single source of truth.** Any new feature, scope change, or architectural decision MUST be reflected here before/during implementation. If implementation drifts from this doc, the doc is fixed (or the implementation is rolled back). See §11 Change Log for how to update.
 >
 > 🌐 **Languages**: English · [中文](./SPEC.zh-CN.md)
@@ -501,6 +501,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
+- 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector (e.g. falldown-cascade), distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
 - 2026-05-23 — v0.9 — **Phase 2 gate PASSED**: live multi-client test confirmed across phone + desktop. Wrapper now honors server-driven resize when running headless (no local TTY), so background wrappers correctly adopt browser-negotiated PTY size. Quick-actions toolbar hidden on viewports ≥ 600px (physical keyboards present).
 - 2026-05-23 — v0.8 — **Multi-client session sizing**: `Session.attach()` returns a `ClientHandle`; tracks per-client viewports; PTY refits to `min(cols)` + `min(rows)` across attached clients. Fixes "desktop view becomes phone-narrow when phone last attached" and "phone can't see input prompt when desktop is also attached".
 - 2026-05-23 — v0.7 — **Phase 2 mobile-usability fixes** (pulled forward from Phase 5): visualViewport-driven `--app-h` for keyboard-aware layout; QuickActions toolbar (Esc/Tab/⇧Tab/arrows/Ctrl+C) so TUI navigation works without a hardware keyboard.

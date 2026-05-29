@@ -1,6 +1,6 @@
 {
   "name": "switchboard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Self-hostable web app to drive AI coding CLIs (Claude Code, Codex, ...) from your phone over Tailscale. Plugin-based.",
   "license": "MIT",

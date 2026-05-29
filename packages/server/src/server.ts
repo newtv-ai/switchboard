@@ -11,6 +11,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { antigravityAdapter } from './adapters/antigravity.js';
 import { codexAdapter } from './adapters/codex.js';
 import { passthroughAdapter } from './adapters/passthrough.js';
+import { registerAlarm } from './alarm-handler.js';
+import { PushManager } from './push.js';
 import { bindWrap } from './wrap-handler.js';
 import { bindWebSocket } from './ws-handler.js';
 
@@ -151,6 +153,21 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   app.get('/adapters', async () => sessions.listAdapters());
 
   app.get('/sessions', async () => sessions.list());
+
+  // --- Alarm webhook + Web Push (fall-detection notifications) ---
+  const certsDir = path.join(projectRoot, 'certs');
+  const push = PushManager.create(certsDir);
+  const alarmSecret = process.env.SWITCHBOARD_ALARM_SECRET;
+  registerAlarm(app, { push, alarmSecret });
+  if (alarmSecret) {
+    app.log.info(
+      `[alarm] webhook ready (HMAC-protected), ${push.subscriptionCount} subscription(s) loaded`,
+    );
+  } else {
+    app.log.warn(
+      '[alarm] /api/alarm is UNAUTHENTICATED — set SWITCHBOARD_ALARM_SECRET to require signed requests (recommended when reachable beyond a trusted LAN)',
+    );
+  }
 
   // --- Optional camera module (go2rtc sidecar) ---
   try {

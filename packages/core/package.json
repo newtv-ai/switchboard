@@ -1,6 +1,6 @@
 {
   "name": "@switchboard/core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "PTY relay, session manager, and ring buffer. Agent-agnostic.",
   "license": "MIT",
   "type": "module",
@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@switchboard/sdk": "0.1.0",
+    "@switchboard/sdk": "1.0.0",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {

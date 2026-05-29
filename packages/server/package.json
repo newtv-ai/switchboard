@@ -1,6 +1,6 @@
 {
   "name": "@switchboard/server",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Switchboard HTTP+WS server. CLI entrypoint.",
   "license": "MIT",
   "type": "module",
@@ -8,7 +8,9 @@
     "switchboard": "./dist/index.js",
     "sw": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsx watch src/index.ts",
@@ -19,22 +21,32 @@
     "@fastify/multipart": "^8.3.0",
     "@fastify/static": "^6.12.0",
     "@fastify/websocket": "^10.0.1",
-    "@switchboard/core": "0.1.0",
-    "@switchboard/sdk": "0.1.0",
+    "@switchboard/core": "1.0.0",
+    "@switchboard/sdk": "1.0.0",
     "fastify": "^4.28.1",
+    "web-push": "^3.6.7",
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "tsup": "^8.3.5"
   },
   "tsup": {
-    "entry": ["src/index.ts"],
-    "format": ["esm"],
+    "entry": [
+      "src/index.ts"
+    ],
+    "format": [
+      "esm"
+    ],
     "dts": false,
     "clean": true,
     "sourcemap": true,
     "target": "node18",
-    "external": ["node-pty", "@switchboard/camera"]
+    "external": [
+      "node-pty",
+      "@switchboard/camera",
+      "web-push"
+    ]
   }
 }

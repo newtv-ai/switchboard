@@ -1,6 +1,6 @@
 {
   "name": "@switchboard/camera",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Bidirectional camera streaming via go2rtc sidecar.",
   "license": "MIT",
   "type": "module",

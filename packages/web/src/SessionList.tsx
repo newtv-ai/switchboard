@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { AlarmToggle } from './AlarmToggle.js';
 import { FileManager } from './FileManager.js';
-import type { ClientMessage, ServerMessage, SessionSummary } from './protocol.js';
+import type { ServerMessage, SessionSummary } from './protocol.js';
 import { WS_BASE } from './ws-url.js';
 
 export interface SessionListProps {
@@ -9,7 +10,7 @@ export interface SessionListProps {
   onCameras?(): void;
 }
 
-type ConnState = 'connecting' | 'open' | 'closed' | 'error';
+type ConnState = 'connecting' | 'reconnecting' | 'open' | 'closed' | 'error';
 
 export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps): JSX.Element {
   const [conn, setConn] = useState<ConnState>('connecting');
@@ -18,44 +19,55 @@ export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps)
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(`${WS_BASE}/ws`);
-    wsRef.current = ws;
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
 
-    ws.onopen = () => setConn('open');
-    ws.onerror = () => setConn('error');
-    ws.onclose = () => setConn('closed');
-    ws.onmessage = (e: MessageEvent<string>) => {
-      let msg: ServerMessage;
-      try {
-        msg = JSON.parse(e.data) as ServerMessage;
-      } catch {
-        return;
-      }
-      if (msg.type === 'sessions') setSessions(msg.list);
-      if (msg.type === 'ping') {
-        if (ws.readyState === WebSocket.OPEN) {
+    const connect = (): void => {
+      const ws = new WebSocket(`${WS_BASE}/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        attempts = 0;
+        setConn('open');
+      };
+      ws.onerror = () => setConn('error');
+      ws.onclose = () => {
+        if (disposed) return;
+        // The phone↔dev-box TLS link drops periodically; reconnect with backoff
+        // so the list self-heals instead of getting stuck (HMR reload is off now).
+        setConn('reconnecting');
+        const delay = Math.min(1000 * 2 ** attempts, 10000);
+        attempts += 1;
+        reconnectTimer = setTimeout(connect, delay);
+      };
+      ws.onmessage = (e: MessageEvent<string>) => {
+        let msg: ServerMessage;
+        try {
+          msg = JSON.parse(e.data) as ServerMessage;
+        } catch {
+          return;
+        }
+        if (msg.type === 'sessions') setSessions(msg.list);
+        if (msg.type === 'ping' && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'pong' }));
         }
-      }
+      };
     };
 
+    connect();
+
     return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
-        ws.close();
+        wsRef.current?.close();
       } catch {
         // ignore
       }
       wsRef.current = null;
     };
   }, []);
-
-  const refresh = (): void => {
-    const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      const msg: ClientMessage = { type: 'list' };
-      ws.send(JSON.stringify(msg));
-    }
-  };
 
   return (
     <div className="list-view">
@@ -67,11 +79,9 @@ export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps)
             Cameras
           </button>
         )}
+        <AlarmToggle />
         <button type="button" className="btn btn-files" onClick={() => setShowFileManager(true)}>
           Upload
-        </button>
-        <button type="button" className="btn" onClick={refresh} disabled={conn !== 'open'}>
-          Refresh
         </button>
       </header>
 

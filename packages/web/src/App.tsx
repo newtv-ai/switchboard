@@ -8,7 +8,21 @@ type View = { mode: 'list' } | { mode: 'terminal'; target: TerminalTarget } | { 
 
 const VIEW_KEY = 'switchboard:view';
 
+/** A `?view=camera(s)` param (e.g. from a tapped push notification) overrides
+ *  the persisted view so the alarm lands straight on the camera page. */
+function viewFromUrl(): View | null {
+  try {
+    const v = new URLSearchParams(window.location.search).get('view');
+    if (v === 'camera' || v === 'cameras') return { mode: 'cameras' };
+  } catch {
+    // ignore malformed query string
+  }
+  return null;
+}
+
 function loadView(): View {
+  const fromUrl = viewFromUrl();
+  if (fromUrl) return fromUrl;
   try {
     const raw = sessionStorage.getItem(VIEW_KEY);
     if (!raw) return { mode: 'list' };
@@ -41,6 +55,35 @@ export function App(): JSX.Element {
     }
   }, [view]);
 
+  // Strip a one-shot ?view= param (from a tapped notification) once consumed,
+  // so a later manual reload restores the persisted view instead of being
+  // permanently re-forced onto the camera page.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('view')) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('view');
+      window.history.replaceState({}, '', url);
+    }
+  }, []);
+
+  // When the app is already open and a push notification is tapped, the service
+  // worker posts {type:'navigate'} instead of opening a fresh window.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent): void => {
+      const data = e.data as { type?: string; url?: string } | null;
+      if (data?.type !== 'navigate') return;
+      try {
+        const v = new URL(data.url ?? '', window.location.origin).searchParams.get('view');
+        if (v === 'camera' || v === 'cameras') setView({ mode: 'cameras' });
+      } catch {
+        // ignore malformed url
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, []);
+
   // Stable callback so TerminalView's useEffect can list it in deps without
   // re-running on every parent render (which would tear down xterm + WS).
   const handleBack = useCallback(() => setView({ mode: 'list' }), []);
@@ -49,7 +92,11 @@ export function App(): JSX.Element {
     <>
       {/* CameraViewer always mounted so phone camera stream persists across navigation */}
       <div style={{ display: view.mode === 'cameras' ? 'contents' : 'none' }}>
-        <CameraViewer serverBase={HTTP_BASE} onBack={handleBack} visible={view.mode === 'cameras'} />
+        <CameraViewer
+          serverBase={HTTP_BASE}
+          onBack={handleBack}
+          visible={view.mode === 'cameras'}
+        />
       </div>
       {view.mode === 'list' && (
         <SessionList

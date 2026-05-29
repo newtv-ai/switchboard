@@ -1,6 +1,6 @@
 {
   "name": "@switchboard/web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Switchboard browser UI. React + xterm.js terminal viewer for phones and desktops.",
   "license": "MIT",
