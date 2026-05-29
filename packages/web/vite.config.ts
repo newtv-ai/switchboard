@@ -95,7 +95,8 @@ function getTargetConfig(req: IncomingMessage): {
         headers,
       },
     };
-  } else if (url.startsWith('/ws') || url.startsWith('/api')) {
+  }
+  if (url.startsWith('/ws') || url.startsWith('/api')) {
     headers.host = '127.0.0.1:8787';
     if (headers.origin) {
       headers.origin = 'http://127.0.0.1:8787';
@@ -110,20 +111,19 @@ function getTargetConfig(req: IncomingMessage): {
         headers,
       },
     };
-  } else {
-    headers.host = `127.0.0.1:${actualHttpsPort}`;
-    return {
-      client: httpsRequest,
-      options: {
-        hostname: '127.0.0.1',
-        port: actualHttpsPort,
-        path: url,
-        method: req.method,
-        headers,
-        rejectUnauthorized: false,
-      },
-    };
   }
+  headers.host = `127.0.0.1:${actualHttpsPort}`;
+  return {
+    client: httpsRequest,
+    options: {
+      hostname: '127.0.0.1',
+      port: actualHttpsPort,
+      path: url,
+      method: req.method,
+      headers,
+      rejectUnauthorized: false,
+    },
+  };
 }
 
 export default defineConfig({
@@ -203,7 +203,7 @@ export default defineConfig({
           // 从 HTTPS 端口 + 1 开始尝试，避免端口冲突并实现自适应
           const startHttpPort = actualHttpsPort + 1;
           const listenWithRetry = (port: number) => {
-            mirror.once('error', (err: any) => {
+            mirror.once('error', (err: NodeJS.ErrnoException) => {
               if (err.code === 'EADDRINUSE') {
                 listenWithRetry(port + 1);
               }

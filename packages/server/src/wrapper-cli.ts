@@ -1,9 +1,9 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename as pathBasename } from 'node:path';
+import { resolveCommand } from '@switchboard/core';
 import * as nodePty from 'node-pty';
 import WebSocket from 'ws';
-import { resolveCommand } from '@switchboard/core';
 import type { WrapClientMessage, WrapServerMessage } from './protocol.js';
 
 interface WrapperOptions {

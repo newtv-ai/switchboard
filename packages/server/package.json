@@ -8,9 +8,7 @@
     "switchboard": "./dist/index.js",
     "sw": "./dist/index.js"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsup",
     "dev": "tsx watch src/index.ts",
@@ -33,20 +31,12 @@
     "tsup": "^8.3.5"
   },
   "tsup": {
-    "entry": [
-      "src/index.ts"
-    ],
-    "format": [
-      "esm"
-    ],
+    "entry": ["src/index.ts"],
+    "format": ["esm"],
     "dts": false,
     "clean": true,
     "sourcemap": true,
     "target": "node18",
-    "external": [
-      "node-pty",
-      "@switchboard/camera",
-      "web-push"
-    ]
+    "external": ["node-pty", "@switchboard/camera", "web-push"]
   }
 }

@@ -146,14 +146,17 @@ export class Session implements SessionHandle {
    */
   attach(listener: SessionListener, initialSize?: { cols: number; rows: number }): ClientHandle {
     const clientId = randomUUID();
-    let isReady = !initialSize;
+    // Local copy: the resize() closure buffers the latest size here until the
+    // grace-period timeout marks the client ready (avoids reassigning the param).
+    let pendingSize = initialSize;
+    let isReady = !pendingSize;
     this.clients.set(clientId, { listener, size: undefined });
-    if (initialSize) {
+    if (pendingSize) {
       const t = setTimeout(() => {
         const client = this.clients.get(clientId);
         if (client) {
           isReady = true;
-          client.size = initialSize;
+          client.size = pendingSize;
           this.refitToClients();
         }
       }, 1200);
@@ -165,7 +168,7 @@ export class Session implements SessionHandle {
         const c = this.clients.get(clientId);
         if (!c) return;
         if (!isReady) {
-          initialSize = { cols, rows };
+          pendingSize = { cols, rows };
           return;
         }
         c.size = { cols, rows };

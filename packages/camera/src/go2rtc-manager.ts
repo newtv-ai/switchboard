@@ -68,7 +68,10 @@ export class Go2rtcManager {
     if (!this.proc) return;
     // Graceful shutdown via API
     try {
-      await fetch(`${this.apiBase}/api/exit?code=0`, { method: 'POST', signal: AbortSignal.timeout(2000) });
+      await fetch(`${this.apiBase}/api/exit?code=0`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(2000),
+      });
     } catch {
       // API unreachable, force kill
     }
@@ -112,10 +115,10 @@ export class Go2rtcManager {
 
   async removeStream(name: string): Promise<boolean> {
     try {
-      await fetch(
-        `${this.apiBase}/api/streams?src=${encodeURIComponent(name)}`,
-        { method: 'DELETE', signal: AbortSignal.timeout(5000) },
-      );
+      await fetch(`${this.apiBase}/api/streams?src=${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(5000),
+      });
       const streams = await this.listStreams();
       const ok = streams !== null && !(name in streams);
       if (ok) removePersistedStream(name);
@@ -127,9 +130,11 @@ export class Go2rtcManager {
 
   async listStreams(): Promise<Record<string, unknown> | null> {
     try {
-      const resp = await fetch(`${this.apiBase}/api/streams`, { signal: AbortSignal.timeout(5000) });
+      const resp = await fetch(`${this.apiBase}/api/streams`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (!resp.ok) return null;
-      return await resp.json() as Record<string, unknown>;
+      return (await resp.json()) as Record<string, unknown>;
     } catch {
       return null;
     }
@@ -139,7 +144,7 @@ export class Go2rtcManager {
     try {
       const resp = await fetch(`${this.apiBase}/api`, { signal: AbortSignal.timeout(3000) });
       if (!resp.ok) return null;
-      return await resp.json() as { version?: string };
+      return (await resp.json()) as { version?: string };
     } catch {
       return null;
     }

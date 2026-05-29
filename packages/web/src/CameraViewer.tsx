@@ -19,7 +19,11 @@ function nextCameraName(existing: CameraSource[]): string {
   }
 }
 
-export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewerProps): JSX.Element {
+export function CameraViewer({
+  serverBase,
+  onBack,
+  visible = true,
+}: CameraViewerProps): JSX.Element {
   const [sources, setSources] = useState<CameraSource[]>([]);
   const [phoneLive, setPhoneLive] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -48,9 +52,14 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
       const resp = await fetch(`${serverBase}/api/camera/streams`);
       const streams = (await resp.json()) as Record<string, { producers?: unknown[] | string }>;
       const pc = streams.phone_cam;
-      if (!pc) { setPhoneLive(false); return; }
+      if (!pc) {
+        setPhoneLive(false);
+        return;
+      }
       const producers = pc.producers;
-      const hasProducer = Array.isArray(producers) ? producers.length > 0 : (typeof producers === 'string' && producers.length > 0);
+      const hasProducer = Array.isArray(producers)
+        ? producers.length > 0
+        : typeof producers === 'string' && producers.length > 0;
       setPhoneLive(hasProducer);
     } catch {
       setPhoneLive(false);
@@ -81,11 +90,16 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
       return;
     }
     try {
-      const resp = await fetch(`${serverBase}/api/camera/sources?name=${encodeURIComponent(name)}&src=${encodeURIComponent(src)}`, {
-        method: 'PUT',
-      });
+      const resp = await fetch(
+        `${serverBase}/api/camera/sources?name=${encodeURIComponent(name)}&src=${encodeURIComponent(src)}`,
+        {
+          method: 'PUT',
+        },
+      );
       if (!resp.ok) {
-        const body = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` })) as { error?: string };
+        const body = (await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }))) as {
+          error?: string;
+        };
         setAddError(body.error ?? `Failed (${resp.status})`);
         return;
       }
@@ -98,7 +112,9 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
   };
 
   const handleRemove = async (name: string) => {
-    await fetch(`${serverBase}/api/camera/sources?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await fetch(`${serverBase}/api/camera/sources?name=${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
     if (selected === name) setSelected(null);
     await fetchSources();
   };
@@ -106,22 +122,36 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
   const streamUrl = selected ? `/go2rtc/stream.html?src=${encodeURIComponent(selected)}` : null;
 
   const containerStyle: React.CSSProperties = {
-    display: 'flex', flexDirection: 'column', height: '100%',
-    background: '#0c0c0c', color: '#d4d4d4', fontFamily: 'system-ui, sans-serif',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    background: '#0c0c0c',
+    color: '#d4d4d4',
+    fontFamily: 'system-ui, sans-serif',
   };
   const headerStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '8px 12px', borderBottom: '1px solid #333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    borderBottom: '1px solid #333',
   };
   const btnStyle: React.CSSProperties = {
-    padding: '6px 12px', border: 'none', borderRadius: '4px',
-    cursor: 'pointer', fontSize: '13px', color: '#fff', background: '#333',
+    padding: '6px 12px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: '#fff',
+    background: '#333',
   };
 
   return (
     <div style={containerStyle}>
       <header style={headerStyle}>
-        <button type="button" style={btnStyle} onClick={onBack}>Back</button>
+        <button type="button" style={btnStyle} onClick={onBack}>
+          Back
+        </button>
         <h1 style={{ fontSize: '16px', margin: 0, flex: 1 }}>Cameras</h1>
       </header>
 
@@ -134,7 +164,7 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
             </button>
           </div>
           <iframe
-            src={streamUrl!}
+            src={streamUrl ?? ''}
             style={{ flex: 1, border: 'none', background: '#000', width: '100%' }}
             allow="autoplay; camera; microphone; fullscreen"
             allowFullScreen
@@ -147,20 +177,42 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
           <div style={{ marginBottom: '16px' }}>
             <h2 style={{ fontSize: '14px', margin: '0 0 8px' }}>Phone Camera (as webcam)</h2>
             {!cam.isStreaming ? (
-              <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => cam.start()}>
+              <button
+                type="button"
+                style={{ ...btnStyle, background: '#2563eb' }}
+                onClick={() => cam.start()}
+              >
                 Start Camera
               </button>
             ) : (
               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={{ color: '#4ade80', fontSize: '13px', marginRight: '8px' }}>Streaming</span>
-                <button type="button" style={btnStyle} onClick={() => cam.switchCamera()}>Flip</button>
-                <button type="button" style={{ ...btnStyle, background: cam.isMuted ? '#dc2626' : '#333' }} onClick={() => cam.toggleMute()}>
+                <span style={{ color: '#4ade80', fontSize: '13px', marginRight: '8px' }}>
+                  Streaming
+                </span>
+                <button type="button" style={btnStyle} onClick={() => cam.switchCamera()}>
+                  Flip
+                </button>
+                <button
+                  type="button"
+                  style={{ ...btnStyle, background: cam.isMuted ? '#dc2626' : '#333' }}
+                  onClick={() => cam.toggleMute()}
+                >
                   {cam.isMuted ? 'Unmute' : 'Mute'}
                 </button>
-                <button type="button" style={{ ...btnStyle, background: '#dc2626' }} onClick={() => cam.stop()}>Stop</button>
+                <button
+                  type="button"
+                  style={{ ...btnStyle, background: '#dc2626' }}
+                  onClick={() => cam.stop()}
+                >
+                  Stop
+                </button>
               </div>
             )}
-            {cam.error && <div style={{ color: '#f87171', fontSize: '12px', marginTop: '4px' }}>{cam.error}</div>}
+            {cam.error && (
+              <div style={{ color: '#f87171', fontSize: '12px', marginTop: '4px' }}>
+                {cam.error}
+              </div>
+            )}
           </div>
 
           {/* Add Camera */}
@@ -172,24 +224,55 @@ export function CameraViewer({ serverBase, onBack, visible = true }: CameraViewe
                 placeholder={`Name / auto: ${nextCameraName(sources)}`}
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
-                style={{ padding: '6px 8px', background: '#1a1a1a', border: '1px solid #444', borderRadius: '4px', color: '#fff', width: '120px' }}
+                style={{
+                  padding: '6px 8px',
+                  background: '#1a1a1a',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  width: '120px',
+                }}
               />
               <input
                 type="text"
                 placeholder="rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/1"
                 value={addUrl}
                 onChange={(e) => setAddUrl(e.target.value)}
-                style={{ padding: '6px 8px', background: '#1a1a1a', border: '1px solid #444', borderRadius: '4px', color: '#fff', flex: 1, minWidth: '200px' }}
+                style={{
+                  padding: '6px 8px',
+                  background: '#1a1a1a',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  flex: 1,
+                  minWidth: '200px',
+                }}
               />
-              <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={handleAdd}>
+              <button
+                type="button"
+                style={{ ...btnStyle, background: '#2563eb' }}
+                onClick={handleAdd}
+              >
                 Add
               </button>
             </div>
-            {addError && <div style={{ color: '#f87171', fontSize: '12px', marginTop: '4px' }}>{addError}</div>}
+            {addError && (
+              <div style={{ color: '#f87171', fontSize: '12px', marginTop: '4px' }}>{addError}</div>
+            )}
             <details style={{ marginTop: '8px', fontSize: '12px', color: '#888' }}>
               <summary style={{ cursor: 'pointer' }}>URL examples / URL 格式参考</summary>
-              <pre style={{ margin: '6px 0', padding: '8px', background: '#111', borderRadius: '4px', overflowX: 'auto', fontSize: '11px', lineHeight: '1.5' }}>
-{`Hikvision / 海康:
+              <pre
+                style={{
+                  margin: '6px 0',
+                  padding: '8px',
+                  background: '#111',
+                  borderRadius: '4px',
+                  overflowX: 'auto',
+                  fontSize: '11px',
+                  lineHeight: '1.5',
+                }}
+              >
+                {`Hikvision / 海康:
   rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/1
 Dahua / 大华:
   rtsp://admin:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0
@@ -208,24 +291,55 @@ RTMP:
 
           {/* Phone cam - auto appears when live */}
           {phoneLive && (
-            <div style={{
-              display: 'flex', flexDirection: 'column', gap: '4px',
-              padding: '8px 12px', background: '#1a1a1a', borderRadius: '6px', marginBottom: '6px',
-            }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                padding: '8px 12px',
+                background: '#1a1a1a',
+                borderRadius: '6px',
+                marginBottom: '6px',
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ flex: 1, fontSize: '14px' }}>
-                  phone_cam <span style={{ color: '#4ade80', fontSize: '12px', marginLeft: '6px' }}>LIVE</span>
+                  phone_cam{' '}
+                  <span style={{ color: '#4ade80', fontSize: '12px', marginLeft: '6px' }}>
+                    LIVE
+                  </span>
                 </span>
-                <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => setSelected('phone_cam')}>
+                <button
+                  type="button"
+                  style={{ ...btnStyle, background: '#2563eb' }}
+                  onClick={() => setSelected('phone_cam')}
+                >
                   View
                 </button>
               </div>
               <details style={{ fontSize: '11px', color: '#888' }}>
                 <summary style={{ cursor: 'pointer' }}>OBS / VLC URL</summary>
-                <div style={{ marginTop: '4px', padding: '6px', background: '#111', borderRadius: '4px', wordBreak: 'break-all' }}>
-                  <div>MP4: <code>{`${window.location.origin}/go2rtc/api/stream.mp4?src=phone_cam`}</code></div>
-                  <div>MJPEG: <code>{`${window.location.origin}/go2rtc/api/frame.jpeg?src=phone_cam`}</code></div>
-                  <div>View: <code>{`${window.location.origin}/go2rtc/stream.html?src=phone_cam`}</code></div>
+                <div
+                  style={{
+                    marginTop: '4px',
+                    padding: '6px',
+                    background: '#111',
+                    borderRadius: '4px',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  <div>
+                    MP4:{' '}
+                    <code>{`${window.location.origin}/go2rtc/api/stream.mp4?src=phone_cam`}</code>
+                  </div>
+                  <div>
+                    MJPEG:{' '}
+                    <code>{`${window.location.origin}/go2rtc/api/frame.jpeg?src=phone_cam`}</code>
+                  </div>
+                  <div>
+                    View:{' '}
+                    <code>{`${window.location.origin}/go2rtc/stream.html?src=phone_cam`}</code>
+                  </div>
                 </div>
               </details>
             </div>
@@ -239,15 +353,27 @@ RTMP:
                 <div
                   key={s.name}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                    padding: '8px 12px', background: '#1a1a1a', borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    background: '#1a1a1a',
+                    borderRadius: '6px',
                   }}
                 >
                   <span style={{ flex: 1, fontSize: '14px' }}>{s.name}</span>
-                  <button type="button" style={{ ...btnStyle, background: '#2563eb' }} onClick={() => setSelected(s.name)}>
+                  <button
+                    type="button"
+                    style={{ ...btnStyle, background: '#2563eb' }}
+                    onClick={() => setSelected(s.name)}
+                  >
                     View
                   </button>
-                  <button type="button" style={{ ...btnStyle, background: '#dc2626' }} onClick={() => handleRemove(s.name)}>
+                  <button
+                    type="button"
+                    style={{ ...btnStyle, background: '#dc2626' }}
+                    onClick={() => handleRemove(s.name)}
+                  >
                     Remove
                   </button>
                 </div>

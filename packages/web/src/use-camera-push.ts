@@ -48,74 +48,82 @@ export function useCameraPush(serverBase: string): CameraPushState & CameraPushA
     setIsMuted(false);
   }, []);
 
-  const start = useCallback(async (facingMode: 'user' | 'environment' = 'environment') => {
-    stop();
-    setError(null);
-    facingRef.current = facingMode;
-
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Camera requires HTTPS. Please access via https:// or use Tailscale HTTPS.');
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: true,
-      });
-      streamRef.current = stream;
-      setLocalStream(stream);
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      pcRef.current = pc;
-
-      for (const track of stream.getTracks()) {
-        pc.addTransceiver(track, { direction: 'sendonly' });
-      }
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Wait for host ICE candidates only (no STUN = instant gathering).
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          if (pc.iceGatheringState === 'complete') { resolve(); return; }
-          pc.addEventListener('icegatheringstatechange', () => {
-            if (pc.iceGatheringState === 'complete') resolve();
-          });
-        }),
-        new Promise<void>((resolve) => setTimeout(resolve, 500)),
-      ]);
-
-      const sdpOffer = pc.localDescription?.sdp;
-      if (!sdpOffer) throw new Error('No local SDP');
-
-      const resp = await fetch(`${serverBase}/api/camera/webrtc?dst=phone_cam`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/sdp' },
-        body: sdpOffer,
-      });
-
-      if (!resp.ok) {
-        throw new Error(`WHIP failed: ${resp.status} ${await resp.text()}`);
-      }
-
-      const sdpAnswer = await resp.text();
-      await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
-
-      pc.addEventListener('connectionstatechange', () => {
-        if (pc.connectionState === 'failed') {
-          setError('WebRTC connection lost');
-          stop();
-        }
-      });
-
-      setIsStreaming(true);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
+  const start = useCallback(
+    async (facingMode: 'user' | 'environment' = 'environment') => {
       stop();
-    }
-  }, [serverBase, stop]);
+      setError(null);
+      facingRef.current = facingMode;
+
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error(
+            'Camera requires HTTPS. Please access via https:// or use Tailscale HTTPS.',
+          );
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: true,
+        });
+        streamRef.current = stream;
+        setLocalStream(stream);
+
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        pcRef.current = pc;
+
+        for (const track of stream.getTracks()) {
+          pc.addTransceiver(track, { direction: 'sendonly' });
+        }
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        // Wait for host ICE candidates only (no STUN = instant gathering).
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            if (pc.iceGatheringState === 'complete') {
+              resolve();
+              return;
+            }
+            pc.addEventListener('icegatheringstatechange', () => {
+              if (pc.iceGatheringState === 'complete') resolve();
+            });
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 500)),
+        ]);
+
+        const sdpOffer = pc.localDescription?.sdp;
+        if (!sdpOffer) throw new Error('No local SDP');
+
+        const resp = await fetch(`${serverBase}/api/camera/webrtc?dst=phone_cam`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: sdpOffer,
+        });
+
+        if (!resp.ok) {
+          throw new Error(`WHIP failed: ${resp.status} ${await resp.text()}`);
+        }
+
+        const sdpAnswer = await resp.text();
+        await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
+
+        pc.addEventListener('connectionstatechange', () => {
+          if (pc.connectionState === 'failed') {
+            setError('WebRTC connection lost');
+            stop();
+          }
+        });
+
+        setIsStreaming(true);
+        setError(null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        stop();
+      }
+    },
+    [serverBase, stop],
+  );
 
   const switchCamera = useCallback(async () => {
     const newFacing = facingRef.current === 'user' ? 'environment' : 'user';

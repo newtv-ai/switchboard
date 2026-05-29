@@ -1,5 +1,12 @@
 import { execFileSync, execSync } from 'node:child_process';
-import { chmodSync, createWriteStream, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  unlinkSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -38,9 +45,7 @@ export function getGo2rtcPath(): string | null {
  * Download go2rtc from GitHub Releases if not already present.
  * Returns the binary path, or null on failure.
  */
-export async function ensureGo2rtc(
-  onLog?: (msg: string) => void,
-): Promise<string | null> {
+export async function ensureGo2rtc(onLog?: (msg: string) => void): Promise<string | null> {
   const existing = getGo2rtcPath();
   if (existing) return existing;
 
@@ -55,7 +60,7 @@ export async function ensureGo2rtc(
   try {
     mkdirSync(BIN_DIR, { recursive: true });
     const target = localBinPath();
-    const tmpFile = target + '.tmp';
+    const tmpFile = `${target}.tmp`;
 
     const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(60_000) });
     if (!resp.ok || !resp.body) {
@@ -64,11 +69,15 @@ export async function ensureGo2rtc(
 
     if (url.endsWith('.zip')) {
       // Download zip to temp, then extract the binary
-      const zipFile = tmpFile + '.zip';
+      const zipFile = `${tmpFile}.zip`;
       const zipStream = createWriteStream(zipFile);
       await pipeline(resp.body, zipStream);
       await extractFromZip(zipFile, target);
-      try { unlinkSync(zipFile); } catch { /* ignore */ }
+      try {
+        unlinkSync(zipFile);
+      } catch {
+        /* ignore */
+      }
     } else {
       // Bare binary (Linux) — direct download
       const fileStream = createWriteStream(tmpFile);
@@ -83,7 +92,9 @@ export async function ensureGo2rtc(
     if (process.platform === 'darwin') {
       try {
         execSync(`xattr -r -d com.apple.quarantine "${target}"`, { stdio: 'ignore' });
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
 
     onLog?.(`[go2rtc] downloaded to ${target}`);
@@ -132,9 +143,11 @@ async function extractFromZip(zipPath: string, targetPath: string): Promise<void
 
 function findNpmPackageBin(pkg: string): string | null {
   try {
-    const result = execFileSync(process.execPath, [
-      '-e', `process.stdout.write(require.resolve(${JSON.stringify(pkg + '/package.json')}))`,
-    ], { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+    const result = execFileSync(
+      process.execPath,
+      ['-e', `process.stdout.write(require.resolve(${JSON.stringify(`${pkg}/package.json`)}))`],
+      { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     const pkgDir = join(result.trim(), '..');
     const ext = process.platform === 'win32' ? '.exe' : '';
     const binPath = join(pkgDir, 'bin', `go2rtc${ext}`);

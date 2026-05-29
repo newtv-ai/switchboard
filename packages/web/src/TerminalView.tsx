@@ -218,9 +218,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
               term.write(msg.data, () => term.scrollToBottom());
             } else {
               const vp = terminalEl.querySelector('.xterm-viewport');
-              const wasAtBottom = vp
-                ? vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 5
-                : true;
+              const wasAtBottom = vp ? vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 5 : true;
               term.write(msg.data, () => {
                 if (wasAtBottom) term.scrollToBottom();
               });

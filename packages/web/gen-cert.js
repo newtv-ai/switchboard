@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Generate self-signed HTTPS certificate for phone camera push.
 // Run: node packages/web/gen-cert.js
-const { existsSync, mkdirSync, writeFileSync } = require('fs');
-const { join } = require('path');
+const { existsSync, mkdirSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
 const forge = require('node-forge');
 
 const certsDir = join(__dirname, '..', '..', 'certs');
@@ -27,7 +27,7 @@ cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
 const attrs = [{ name: 'commonName', value: 'switchboard' }];
 cert.setSubject(attrs);
 cert.setIssuer(attrs);
-const os = require('os');
+const os = require('node:os');
 const lanIps = [
   { type: 2, value: 'localhost' },
   { type: 7, ip: '127.0.0.1' },

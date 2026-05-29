@@ -11,8 +11,7 @@ function redactUrl(url: string): string {
 }
 import { Go2rtcManager, type Go2rtcManagerOpts } from './go2rtc-manager.js';
 
-export interface CameraModuleOpts extends Go2rtcManagerOpts {
-}
+export interface CameraModuleOpts extends Go2rtcManagerOpts {}
 
 export interface CameraModule {
   manager: Go2rtcManager;
@@ -126,27 +125,32 @@ async function registerProxyRoutes(app: FastifyInstance, manager: Go2rtcManager)
     return { sources: sanitized };
   });
 
-  app.put<{ Querystring: { name: string; src: string } }>('/api/camera/sources', async (req, reply) => {
-    const { name, src } = req.query;
-    if (!name) return reply.code(400).send({ error: 'name required' });
-    if (name === 'phone_cam') return reply.code(400).send({ error: 'reserved stream name' });
-    const safeSchemes = ['rtsp://', 'rtsps://', 'rtmp://', 'http://', 'https://'];
-    if (src && !safeSchemes.some((s) => src.toLowerCase().startsWith(s))) {
-      return reply.code(400).send({ error: 'only rtsp/rtmp/http(s) URLs are allowed' });
-    }
-    // Check for duplicate URL across existing streams
-    const existing = await manager.listStreams();
-    if (existing && src) {
-      for (const [existingName, info] of Object.entries(existing)) {
-        const producers = (info as { producers?: Array<{ url?: string }> }).producers;
-        if (Array.isArray(producers) && producers.some((p) => p.url === src)) {
-          return reply.code(400).send({ error: `URL already added as "${existingName}" / 该 URL 已存在` });
+  app.put<{ Querystring: { name: string; src: string } }>(
+    '/api/camera/sources',
+    async (req, reply) => {
+      const { name, src } = req.query;
+      if (!name) return reply.code(400).send({ error: 'name required' });
+      if (name === 'phone_cam') return reply.code(400).send({ error: 'reserved stream name' });
+      const safeSchemes = ['rtsp://', 'rtsps://', 'rtmp://', 'http://', 'https://'];
+      if (src && !safeSchemes.some((s) => src.toLowerCase().startsWith(s))) {
+        return reply.code(400).send({ error: 'only rtsp/rtmp/http(s) URLs are allowed' });
+      }
+      // Check for duplicate URL across existing streams
+      const existing = await manager.listStreams();
+      if (existing && src) {
+        for (const [existingName, info] of Object.entries(existing)) {
+          const producers = (info as { producers?: Array<{ url?: string }> }).producers;
+          if (Array.isArray(producers) && producers.some((p) => p.url === src)) {
+            return reply
+              .code(400)
+              .send({ error: `URL already added as "${existingName}" / 该 URL 已存在` });
+          }
         }
       }
-    }
-    const ok = await manager.addStream(name, src ?? '');
-    return ok ? { success: true } : reply.code(500).send({ error: 'failed to add stream' });
-  });
+      const ok = await manager.addStream(name, src ?? '');
+      return ok ? { success: true } : reply.code(500).send({ error: 'failed to add stream' });
+    },
+  );
 
   app.delete<{ Querystring: { name: string } }>('/api/camera/sources', async (req, reply) => {
     const { name } = req.query;
