@@ -117,6 +117,8 @@ npm run dev
 ```
 
 > **一键启动**：仓库根目录带了 `start.bat`（Windows，双击即可）和 `start.sh`（Linux / macOS，`bash start.sh`）。它们会先把 `5173` / `8787` 上的旧 dev 进程清掉，然后执行 `npm run dev`。等价于上面的"终端 A"，"终端 B"（`sw run …`）还是要单独开。
+>
+> **显示 / 隐藏黑窗口**：两个启动脚本顶部都有一行 `SHOW_WINDOW` 开关——`true`（默认）保留控制台窗口、能实时看日志；`false` 后台静默运行、不显示窗口。Windows 下 `false` 会隐藏那个黑色控制台窗口（不再输出日志，停止请在任务管理器结束 `node` 进程）；Linux / macOS 没有自动弹出的窗口，`false` 等价于把进程脱离终端后台运行（`nohup`，日志写入 `switchboard.log`，停止用 `kill $(lsof -ti:8787,5173)`）。
 
 ```bash
 # 终端 B —— 包一个 AI CLI 给手机用

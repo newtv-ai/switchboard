@@ -117,6 +117,8 @@ npm run dev
 ```
 
 > **One-click launch**: the repo ships a `start.bat` (Windows, double-click) and `start.sh` (Linux / macOS, `bash start.sh`) at the project root. They free up ports `5173` / `8787` from any prior dev process and then run `npm run dev`. Equivalent to Terminal A above — Terminal B (`sw run …`) is still separate.
+>
+> **Show / hide the console window**: both launchers expose a `SHOW_WINDOW` toggle near the top — `true` (default) keeps the console visible so you can watch logs; `false` runs silently in the background. On Windows `false` hides the black console window (logs are dropped — stop it by ending the `node` process in Task Manager). Linux / macOS has no pop-up window, so `false` just detaches the process (`nohup`, logs go to `switchboard.log`, stop with `kill $(lsof -ti:8787,5173)`).
 
 ```bash
 # Terminal B — wrap an AI CLI so phones can attach to it
