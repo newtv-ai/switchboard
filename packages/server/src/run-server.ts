@@ -1,7 +1,7 @@
 import { startServer } from './server.js';
 
 /**
- * `switchboard` (with no args) or `switchboard serve` — start the HTTP+WS server.
+ * `switchboard` (with no args) or `switchboard serve` starts the HTTP+WS server.
  */
 export async function runServer(): Promise<void> {
   const port = Number(process.env.PORT ?? 8787);
@@ -16,16 +16,10 @@ export async function runServer(): Promise<void> {
   console.log(`  Browser WS:  ws://${host}:${port}/ws`);
   console.log(`  Wrapper WS:  ws://127.0.0.1:${port}/wrap (localhost-only)`);
   console.log(`  Health:      ${server.url}/health`);
-  if (host === '0.0.0.0') {
-    console.log(
-      '\n  ⚠️  Bound to all interfaces (no auth yet — Phase 4). Use only on a trusted network.\n',
-    );
-  } else {
-    console.log('');
-  }
+  console.log('');
 
   const shutdown = async (sig: string): Promise<void> => {
-    console.log(`\nReceived ${sig}, shutting down…`);
+    console.log(`\nReceived ${sig}, shutting down...`);
     await server.close();
     process.exit(0);
   };
