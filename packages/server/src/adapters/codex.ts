@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '@switchboard/sdk';
+import { detectCommand } from '../detect.js';
 
 /**
  * OpenAI Codex CLI adapter.
@@ -31,6 +32,10 @@ export const codexAdapter: AgentAdapter = {
     adapterVersion: '0.1.0',
     agentVersionRange: '*',
     capabilities: ['tool-use', 'approval-flow'],
+    install: {
+      detect: () => detectCommand('codex'),
+      hint: 'Install the OpenAI Codex CLI — https://github.com/openai/codex',
+    },
   },
   buildCommand: ({ cwd, env }) => ({
     command: 'codex',

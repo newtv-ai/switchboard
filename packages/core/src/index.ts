@@ -19,3 +19,10 @@ export {
   type SpawnOpts,
   type RegisterOpts,
 } from './session-manager.js';
+export {
+  type AgentMember,
+  type MemberRole,
+  type Workgroup,
+  type WorkgroupSummary,
+  summarizeWorkgroup,
+} from './workgroup.js';

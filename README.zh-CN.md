@@ -499,6 +499,17 @@ switchboard/
 └── README.md        # 即本文（英文版）
 ```
 
+## 相关项目
+
+Switchboard 处在 2026 年的 "agentmaxxing"（多个 AI 编码 CLI 并行）赛道。该赛道多数工具是桌面 / tmux 编排器；Switchboard 的定位是 **手机优先、跑在局域网 / Tailscale 上的 PTY 中继**。
+
+- [slopus/happy](https://github.com/slopus/happy) —— PTY-wrap 架构，Switchboard 的主要灵感来源。
+- [claude_code_bridge (CCB)](https://github.com/bfly123/claude_code_bridge) —— 可视的多 AI CLI 协作工作台（Claude / Codex / Gemini / …），带共享记忆文件 + 任务委派。
+- [ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator) —— 并行编码 agent，各自隔离在 git worktree、各开一个 PR。
+- [awesome-cli-coding-agents](https://github.com/bradAGI/awesome-cli-coding-agents) —— 终端原生 AI 编码 agent 及其编排框架的清单目录。
+- [go2rtc](https://github.com/AlexxIT/go2rtc) —— 摄像头模块用到的流媒体引擎。
+- [Tailscale](https://tailscale.com) —— 从手机访问开发机的推荐方式。
+
 ## 许可
 
 [MIT](./LICENSE) —— 随你怎么用，不担保。

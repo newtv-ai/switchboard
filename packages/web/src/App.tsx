@@ -2,9 +2,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { CameraViewer } from './CameraViewer.js';
 import { SessionList } from './SessionList.js';
 import { type TerminalTarget, TerminalView } from './TerminalView.js';
+import { WorkgroupList } from './WorkgroupList.js';
+import { WorkgroupView } from './WorkgroupView.js';
 import { HTTP_BASE } from './ws-url.js';
 
-type View = { mode: 'list' } | { mode: 'terminal'; target: TerminalTarget } | { mode: 'cameras' };
+type View =
+  | { mode: 'list' }
+  | { mode: 'terminal'; target: TerminalTarget }
+  | { mode: 'cameras' }
+  | { mode: 'workgroups' }
+  | { mode: 'workgroup'; id: string };
 
 const VIEW_KEY = 'switchboard:view';
 
@@ -29,6 +36,8 @@ function loadView(): View {
     const parsed = JSON.parse(raw) as View;
     if (parsed?.mode === 'list') return { mode: 'list' };
     if (parsed?.mode === 'cameras') return parsed;
+    if (parsed?.mode === 'workgroups') return parsed;
+    if (parsed?.mode === 'workgroup' && typeof parsed.id === 'string') return parsed;
     if (
       parsed?.mode === 'terminal' &&
       (parsed.target?.kind === 'attach' || parsed.target?.kind === 'create')
@@ -107,9 +116,22 @@ export function App(): JSX.Element {
             setView({ mode: 'terminal', target: { kind: 'create', adapterId } })
           }
           onCameras={() => setView({ mode: 'cameras' })}
+          onWorkgroups={() => setView({ mode: 'workgroups' })}
         />
       )}
       {view.mode === 'terminal' && <TerminalView target={view.target} onBack={handleBack} />}
+      {view.mode === 'workgroups' && (
+        <WorkgroupList onOpen={(id) => setView({ mode: 'workgroup', id })} onBack={handleBack} />
+      )}
+      {view.mode === 'workgroup' && (
+        <WorkgroupView
+          id={view.id}
+          onAttach={(sessionId) =>
+            setView({ mode: 'terminal', target: { kind: 'attach', sessionId } })
+          }
+          onBack={() => setView({ mode: 'workgroups' })}
+        />
+      )}
     </>
   );
 }

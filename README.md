@@ -499,6 +499,17 @@ switchboard/
 └── README.md        # this file
 ```
 
+## Related projects
+
+Switchboard sits in the 2026 "agentmaxxing" space — running several AI coding CLIs in parallel. Most tools there are desktop / tmux orchestrators; Switchboard's niche is **phone-first PTY relay over LAN / Tailscale**.
+
+- [slopus/happy](https://github.com/slopus/happy) — PTY-wrap architecture; Switchboard's main inspiration.
+- [claude_code_bridge (CCB)](https://github.com/bfly123/claude_code_bridge) — visible multi-agent CLI workspace (Claude / Codex / Gemini / …) with shared-memory files + task delegation.
+- [ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator) — parallel coding agents in isolated git worktrees, one PR each.
+- [awesome-cli-coding-agents](https://github.com/bradAGI/awesome-cli-coding-agents) — directory of terminal-native AI coding agents and the harnesses that orchestrate them.
+- [go2rtc](https://github.com/AlexxIT/go2rtc) — streaming engine used by the camera module.
+- [Tailscale](https://tailscale.com) — recommended way to reach your dev box from a phone.
+
 ## License
 
 [MIT](./LICENSE) — do whatever you want, no warranty.

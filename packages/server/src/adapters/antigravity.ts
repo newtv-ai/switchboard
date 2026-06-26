@@ -1,4 +1,5 @@
 import type { AgentAdapter } from '@switchboard/sdk';
+import { detectCommand } from '../detect.js';
 
 /**
  * Google Antigravity CLI adapter (`agy`, Go binary; distinct from the
@@ -22,6 +23,10 @@ export const antigravityAdapter: AgentAdapter = {
     adapterVersion: '0.1.0',
     agentVersionRange: '*',
     capabilities: ['tool-use', 'approval-flow'],
+    install: {
+      detect: () => detectCommand('agy'),
+      hint: 'Install the Google Antigravity CLI (agy) — https://github.com/google-antigravity/antigravity-cli',
+    },
   },
   buildCommand: ({ cwd, env }) => ({
     command: 'agy',

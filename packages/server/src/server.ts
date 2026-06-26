@@ -6,13 +6,21 @@ import * as nodeUrl from 'node:url';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import { SessionManager } from '@switchboard/core';
+import { type MemberRole, SessionManager } from '@switchboard/core';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { antigravityAdapter } from './adapters/antigravity.js';
+import { claudeAdapter } from './adapters/claude.js';
 import { codexAdapter } from './adapters/codex.js';
 import { passthroughAdapter } from './adapters/passthrough.js';
 import { registerAlarm } from './alarm-handler.js';
+import { scanClis } from './cli-scanner.js';
 import { PushManager } from './push.js';
+import { peekSession } from './session-peek.js';
+import { TaskManager } from './task-manager.js';
+import { type TaskStatus, TaskStore } from './task-store.js';
+import { WorkflowManager } from './workflow-manager.js';
+import { WorkgroupManager } from './workgroup-manager.js';
+import { WorkgroupStore } from './workgroup-store.js';
 import { bindWrap } from './wrap-handler.js';
 import { bindWebSocket } from './ws-handler.js';
 
@@ -36,8 +44,16 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
 
   const sessions = new SessionManager();
   sessions.registerAdapter(passthroughAdapter);
+  sessions.registerAdapter(claudeAdapter);
   sessions.registerAdapter(codexAdapter);
   sessions.registerAdapter(antigravityAdapter);
+
+  const workgroups = new WorkgroupManager(sessions, new WorkgroupStore());
+  await workgroups.init();
+  const tasks = new TaskManager(sessions, workgroups, new TaskStore());
+  await tasks.init();
+  const workflows = new WorkflowManager(workgroups, tasks);
+  await workflows.init();
 
   // Calculate project root regardless of where the script was invoked from.
   // __dirname here is either packages/server/src or packages/server/dist.
@@ -153,6 +169,151 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   app.get('/adapters', async () => sessions.listAdapters());
 
   app.get('/sessions', async () => sessions.list());
+
+  // Scan the machine for available AI coding CLIs (registered adapters that can
+  // detect themselves + well-known adapter-less commands). Read-only.
+  app.get('/api/scan', async () => scanClis(sessions));
+
+  // --- Workgroups (multi-AI shared-context groups) ---
+  app.get('/api/workgroups', async () => workgroups.list());
+
+  app.post('/api/workgroups', async (req, reply) => {
+    const body = (req.body ?? {}) as { name?: string; cwd?: string };
+    try {
+      return await workgroups.create(body.name ?? '', body.cwd || projectRoot);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  app.get('/api/workgroups/:id', async (req, reply) => {
+    const wg = workgroups.get((req.params as { id: string }).id);
+    if (!wg) return reply.code(404).send({ error: 'Workgroup not found' });
+    return wg;
+  });
+
+  // Option B: spawn a fresh CLI session in the workgroup's folder and add it.
+  app.post('/api/workgroups/:id/members', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { adapterId?: string };
+    if (!body.adapterId) return reply.code(400).send({ error: 'adapterId required' });
+    try {
+      return await workgroups.addMember(id, body.adapterId);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  app.post('/api/workgroups/:id/members/:sessionId/role', async (req, reply) => {
+    const { id, sessionId } = req.params as { id: string; sessionId: string };
+    const body = (req.body ?? {}) as { role?: MemberRole };
+    if (!body.role) return reply.code(400).send({ error: 'role required' });
+    try {
+      await workgroups.setRole(id, sessionId, body.role);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  app.delete('/api/workgroups/:id/members/:sessionId', async (req, reply) => {
+    const { id, sessionId } = req.params as { id: string; sessionId: string };
+    try {
+      await workgroups.removeMember(id, sessionId);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Manual handoff: pass work from one member to another (idea #9).
+  app.post('/api/workgroups/:id/handoff', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as {
+      fromSessionId?: string;
+      toSessionId?: string;
+      note?: string;
+    };
+    if (!body.fromSessionId || !body.toSessionId) {
+      return reply.code(400).send({ error: 'fromSessionId and toSessionId required' });
+    }
+    try {
+      return await workgroups.handoff(id, body.fromSessionId, body.toSessionId, body.note);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // --- Tasks within a workgroup ---
+  app.get('/api/workgroups/:id/tasks', async (req) =>
+    tasks.list((req.params as { id: string }).id),
+  );
+
+  app.post('/api/workgroups/:id/tasks', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { title?: string; description?: string };
+    if (!body.title && !body.description) {
+      return reply.code(400).send({ error: 'title or description required' });
+    }
+    try {
+      return await tasks.create(id, body.title ?? '', body.description ?? '');
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Assign a task to a member session and dispatch it (writes to that PTY's stdin).
+  app.post('/api/workgroups/:id/tasks/:taskId/assign', async (req, reply) => {
+    const { id, taskId } = req.params as { id: string; taskId: string };
+    const body = (req.body ?? {}) as { sessionId?: string };
+    if (!body.sessionId) return reply.code(400).send({ error: 'sessionId required' });
+    try {
+      return await tasks.assign(id, taskId, body.sessionId);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  app.post('/api/workgroups/:id/tasks/:taskId/status', async (req, reply) => {
+    const { id, taskId } = req.params as { id: string; taskId: string };
+    const body = (req.body ?? {}) as { status?: TaskStatus; result?: string };
+    if (!body.status) return reply.code(400).send({ error: 'status required' });
+    try {
+      return await tasks.setStatus(id, taskId, body.status, body.result);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Read-only peek at a session's recent output (approximate, ANSI-stripped).
+  app.get('/api/sessions/:id/peek', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const session = sessions.get(id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    const lines = Number((req.query as { lines?: string }).lines) || 40;
+    return { sessionId: id, lines, text: peekSession(session, lines) };
+  });
+
+  // --- Workflow (four-step SOP) within a workgroup ---
+  app.get('/api/workgroups/:id/workflow', async (req) => {
+    return workflows.get((req.params as { id: string }).id) ?? null;
+  });
+
+  app.post('/api/workgroups/:id/workflow/start', async (req, reply) => {
+    try {
+      return await workflows.start((req.params as { id: string }).id);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  app.post('/api/workgroups/:id/workflow/advance', async (req, reply) => {
+    try {
+      return await workflows.advance((req.params as { id: string }).id);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
 
   // --- Alarm webhook + Web Push (fall-detection notifications) ---
   const certsDir = path.join(projectRoot, 'certs');

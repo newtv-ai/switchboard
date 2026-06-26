@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlarmToggle } from './AlarmToggle.js';
+import { CliScan } from './CliScan.js';
 import { FileManager } from './FileManager.js';
 import type { ServerMessage, SessionSummary } from './protocol.js';
 import { WS_BASE } from './ws-url.js';
@@ -8,14 +9,21 @@ export interface SessionListProps {
   onAttach(sessionId: string): void;
   onCreate(adapterId: string): void;
   onCameras?(): void;
+  onWorkgroups?(): void;
 }
 
 type ConnState = 'connecting' | 'reconnecting' | 'open' | 'closed' | 'error';
 
-export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps): JSX.Element {
+export function SessionList({
+  onAttach,
+  onCreate,
+  onCameras,
+  onWorkgroups,
+}: SessionListProps): JSX.Element {
   const [conn, setConn] = useState<ConnState>('connecting');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [showFileManager, setShowFileManager] = useState(false);
+  const [showCliScan, setShowCliScan] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -79,6 +87,14 @@ export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps)
             Cameras
           </button>
         )}
+        <button type="button" className="btn btn-files" onClick={() => setShowCliScan(true)}>
+          Agents
+        </button>
+        {onWorkgroups && (
+          <button type="button" className="btn btn-files" onClick={onWorkgroups}>
+            Workgroups
+          </button>
+        )}
         <AlarmToggle />
         <button type="button" className="btn btn-files" onClick={() => setShowFileManager(true)}>
           Upload
@@ -120,6 +136,7 @@ export function SessionList({ onAttach, onCreate, onCameras }: SessionListProps)
         </button>
       </footer>
       {showFileManager && <FileManager onClose={() => setShowFileManager(false)} />}
+      {showCliScan && <CliScan onClose={() => setShowCliScan(false)} />}
     </div>
   );
 }

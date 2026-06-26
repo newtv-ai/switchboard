@@ -342,6 +342,7 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 switchboard/
 ├── SPEC.md                       ← this file (single source of truth)
 ├── README.md                     ← public face; user-facing intro
+├── CLAUDE.md / AGENTS.md         ← project-level agent instructions (AGENTS.md canonical, CLAUDE.md points to it)
 ├── CHANGELOG.md                  ← release notes
 ├── LICENSE                       ← MIT
 ├── package.json                  ← npm workspaces root
@@ -356,10 +357,12 @@ switchboard/
 │   ├── adapter-claude/
 │   ├── adapter-codex/
 │   └── adapter-passthrough/
-├── docs/
-│   ├── adapter-authoring.md      ← how to write a 3rd-party adapter
-│   ├── architecture-decisions.md ← ADRs as they accumulate
-│   └── security-model.md         ← threat model details
+├── docs/                         ← gitignored: LOCAL working notes only (see .gitignore:58)
+│   ├── planning/                 ← planning & roadmap drafts (local)
+│   ├── audit/                    ← audit reports (local)
+│   └── architecture/             ← ADRs / security-model drafts (local)
+│   (public contributor docs e.g. adapter-authoring.md: kept in docs/ for now — no concrete
+│    content yet; move to a tracked path once they're written)
 └── examples/
     └── adapter-template/         ← copy-paste starting point for new adapters
 ```
