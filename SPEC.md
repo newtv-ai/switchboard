@@ -291,6 +291,35 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 
 ---
 
+### 4.6 Workgroups (multi-AI collaboration)
+
+A **workgroup** binds one project folder to several agent sessions that share an
+on-disk context, so multiple AI CLIs can work the same project from a phone. It's
+a thin layer over the SessionManager — members are ordinary Sessions referenced by
+id. Added 2026-06-27 (see §8 Phase 8, §11).
+
+- **Model** (`packages/core/src/workgroup.ts`): `Workgroup { id, name, cwd, contextDir, members }`; `AgentMember { sessionId, adapterId, role: "active"|"observer"|"idle", joinedAt }`.
+- **One workgroup per project folder** (read-one model): `create()` resolves the cwd, **requires it to exist**, and **dedupes by folder** (case-insensitive on Windows/macOS) so a project's shared memory accumulates instead of fragmenting. Default name = folder basename.
+- **Members spawn on demand** (Option B): adding a member server-spawns a CLI in the workgroup's folder (`SessionManager.spawn`); it's also a normal entry in `/sessions`.
+- **Shared context = project-local Markdown** at `<cwd>/.switchboard/` (`context.md`, `decisions.md`, `handoff.md`, `artifacts/`, `timeline.jsonl`) — the cross-agent protocol (cf. CCB's `.ccb/`). On create, an idempotent managed block is injected into the project's `AGENTS.md` and `CLAUDE.md` so agents auto-read it. Per-file writes are serialized (single-writer queue).
+- **Tasks** (`task-*.ts`): dispatch = write the (single-line) task to the assigned member's PTY stdin. Cross-AI **peek** returns another session's recent output (ring buffer, ANSI-stripped, approximate).
+- **Workflow** (`workflow*.ts`): four-step SOP (planning → execution → audit → bugfix → done) that creates a phase-templated task per step.
+- **Handoff** (idea #9, manual — no token auto-switch): logs a note to `handoff.md`, flips roles, kicks the target to resume.
+- **Persistence**: metadata under `~/.switchboard/workgroups/<id>/` via atomic JSON writes (`fs-json.ts`); on restart, metadata reloads but members are pruned (PTYs don't survive — §9 Q3).
+
+#### REST + WS surface
+- `GET /api/scan` — detect installed AI CLIs (adapters' `install.detect()` + probes of `gemini`/`qwen`/`opencode`/`aider`/`cursor`).
+- `GET|POST /api/workgroups`, `GET /api/workgroups/:id`
+- `POST .../:id/members`, `POST .../members/:sessionId/role`, `DELETE .../members/:sessionId`, `POST .../:id/handoff`
+- `GET|POST .../:id/tasks`, `POST .../tasks/:taskId/assign`, `POST .../tasks/:taskId/status`
+- `GET .../:id/workflow`, `POST .../workflow/start`, `POST .../workflow/advance`
+- `GET /api/sessions/:id/peek?lines=N`
+- `GET /workgroups/ws` — client sends `{type:"subscribe", workgroupId}`, receives `{type:"workgroup.changed"}` on any mutation (live refresh), fed by `contextEvents` from `appendTimeline`.
+
+> These endpoints share the single-token trust model (§4.5) — same exposure as `/sessions`. Creating a member spawns a process in a user-supplied folder, the same capability `/ws create` already grants.
+
+---
+
 ## 5. Built-in Adapters (v1)
 
 ### 5.1 `adapter-claude`
@@ -457,6 +486,20 @@ Phone-usability follow-ups landed alongside Phase 2 (would otherwise be Phase 5)
 
 ---
 
+### Phase 8 — Multi-AI Workgroups  ✅ Completed 2026-06-27
+**Scope**: turn N parallel sessions into a phone-controllable multi-AI workgroup — shared context, task dispatch, four-step workflow, manual handoff. See §4.6.
+
+- [x] P0 docs: project-level `AGENTS.md`/`CLAUDE.md`, README "Related projects", SPEC §7 sync
+- [x] P1 CLI scan (`detect()` + `cli-scanner.ts` + `/api/scan`) + new `claude` adapter
+- [x] P2 workgroup model + manager + project-local `.switchboard/` shared context + UI
+- [x] P3 tasks + dispatch + cross-AI peek + task board
+- [x] P4 four-step workflow templates
+- [x] P5 manual handoff (idea #9; token auto-switch deliberately not built — no usage-data source)
+- [x] Live workgroup WS broadcast (`/workgroups/ws`)
+- [x] Gate: `scripts/test-workgroups.ps1` — 28/28 end-to-end checks pass (incl. restart persistence)
+
+---
+
 ## 9. Open Questions
 
 | # | Question | Decision needed by | Tentative answer |
@@ -504,6 +547,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
+- 2026-06-27 — v1.1 — **Multi-AI Workgroups** (Phase 8, §4.6): CLI scan + `claude` adapter; workgroup model (one-per-folder, dedupe, Option-B spawn); project-local `.switchboard/` shared context with AGENTS/CLAUDE injection; tasks + dispatch + peek; four-step workflow; manual handoff; live `/workgroups/ws` broadcast; atomic JSON persistence. `scripts/test-workgroups.ps1` 28/28 green. Token auto-switch intentionally not built (no usage-data source).
 - 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector, distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
 - 2026-05-23 — v0.9 — **Phase 2 gate PASSED**: live multi-client test confirmed across phone + desktop. Wrapper now honors server-driven resize when running headless (no local TTY), so background wrappers correctly adopt browser-negotiated PTY size. Quick-actions toolbar hidden on viewports ≥ 600px (physical keyboards present).
 - 2026-05-23 — v0.8 — **Multi-client session sizing**: `Session.attach()` returns a `ClientHandle`; tracks per-client viewports; PTY refits to `min(cols)` + `min(rows)` across attached clients. Fixes "desktop view becomes phone-narrow when phone last attached" and "phone can't see input prompt when desktop is also attached".

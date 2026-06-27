@@ -37,6 +37,7 @@
 - [告警通知（跌倒检测）](#告警通知跌倒检测)
 - [防火墙——开端口](#防火墙开端口)
 - [支持的 agent](#支持的-agent)
+- [工作群（多 AI 协作）](#工作群多-ai-协作)
 - [FAQ](#faq)
 - [项目结构](#项目结构)
 - [许可](#许可)
@@ -255,6 +256,23 @@ curl http://<dev-ip>:8787/health     # 应返回 {"ok":true,"sessions":0}
 | `antigravity`  | `agy`    | 命令名     | 直接包装；OAuth 在第一次运行时做                                        |
 
 要覆盖自动识别，加 `--adapter <id>`。要写新的 adapter：实现 `@switchboard/sdk` 里的 `AgentAdapter` 接口，然后在 `packages/server/src/server.ts` 里注册即可。
+
+## 工作群（多 AI 协作）
+
+让多个 AI CLI 针对**同一个项目、共享上下文**协作,并从手机遥控。一个*工作群*绑定一个项目文件夹;成员是 AI 会话,共同读写该项目里的 `.switchboard/` 目录。
+
+1. **扫描** —— 会话列表点 **Agents**,看本机装了哪些 AI CLI(Claude Code、Codex、Antigravity……)。
+2. **建工作群** —— 点 **Workgroups → + New workgroup**,选项目文件夹。一个文件夹一个工作群,其共享记忆跨会话累积。
+3. **加 AI** —— 每个都在该文件夹里启动。可切换成员角色(active / observer / idle)。
+4. **任务** —— 发布任务并**分派**给某成员;**Peek** 查看任一成员的近期输出。
+5. **工作流** —— 内置四步 SOP:规划 → 执行 → 审计 → 修 bug。
+6. **交接** —— 带一段笔记把活从一个 AI 交给另一个(写入 `.switchboard/handoff.md`)。
+
+更新是**实时的**(WebSocket)—— 同一个工作群在两台设备打开会自动同步。
+
+> **注意:** 建工作群会往所选项目文件夹里写东西 —— 一个 `.switchboard/` 目录,以及在 `AGENTS.md`/`CLAUDE.md` 里加一个带标记的小块(让 agent 自动读共享上下文)。请选你接受这点的文件夹。
+
+回归测试:`powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1`(28 项端到端检查)。设计说明见 `SPEC.md` §4.6。
 
 ## FAQ
 
@@ -491,7 +509,8 @@ switchboard/
 │   └── camera/      # 可选：go2rtc 摄像头流媒体
 ├── scripts/
 │   ├── install.sh   # Linux & macOS 安装脚本
-│   └── install.ps1  # Windows 安装脚本
+│   ├── install.ps1  # Windows 安装脚本
+│   └── test-workgroups.ps1  # 工作群端到端回归测试
 ├── start.sh         # 一键启动开发态（Linux / macOS）
 ├── start.bat        # 一键启动开发态（Windows）
 ├── downloads/       # 手机↔开发机文件互传的落点目录（已 gitignore）

@@ -291,6 +291,32 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 
 ---
 
+### 4.6 工作群（多 AI 协作）
+
+**工作群**把一个项目文件夹绑定到若干 agent 会话，让多个 AI CLI 共享上下文、从手机协同同一个项目。它是叠在 SessionManager 上的薄层 —— 成员就是按 id 引用的普通 Session。2026-06-27 新增（见 §8 Phase 8、§11）。
+
+- **模型**（`packages/core/src/workgroup.ts`）：`Workgroup { id, name, cwd, contextDir, members }`；`AgentMember { sessionId, adapterId, role: "active"|"observer"|"idle", joinedAt }`。
+- **一个文件夹一个工作群**（读法一）：`create()` 解析 cwd、**要求其存在**、并**按文件夹去重**（Windows/macOS 大小写不敏感），让项目共享记忆累积而非碎片化。默认名 = 文件夹 basename。
+- **成员按需启动**（Option B）：加成员即在工作群文件夹里 server-spawn 一个 CLI（`SessionManager.spawn`），它同时是 `/sessions` 里的普通会话。
+- **共享上下文 = 项目内 Markdown**，位于 `<cwd>/.switchboard/`（`context.md`、`decisions.md`、`handoff.md`、`artifacts/`、`timeline.jsonl`）—— 跨 agent 协议（参照 CCB 的 `.ccb/`）。建群时往项目 `AGENTS.md`/`CLAUDE.md` 注入带标记、幂等的块，让成员自动读它。每文件写操作串行化（单写者队列）。
+- **任务**（`task-*.ts`）：分派 = 把（单行）任务写进被分派成员的 PTY stdin。跨 AI **peek** 返回另一会话的近期输出（ring buffer 去 ANSI，近似）。
+- **工作流**（`workflow*.ts`）：四步 SOP（规划 → 执行 → 审计 → 修 bug → done），每步建一条阶段模板任务。
+- **交接**（想法#9，手动 —— 不做 token 自动切换）：往 `handoff.md` 写笔记、翻转角色、提示目标接手。
+- **持久化**：元数据存 `~/.switchboard/workgroups/<id>/`，原子 JSON 写（`fs-json.ts`）；重启后元数据重载，但成员被剪除（PTY 不跨重启 —— §9 Q3）。
+
+#### REST + WS 接口
+- `GET /api/scan` —— 探测本机 AI CLI（适配器 `install.detect()` + 探测 `gemini`/`qwen`/`opencode`/`aider`/`cursor`）。
+- `GET|POST /api/workgroups`、`GET /api/workgroups/:id`
+- `POST .../:id/members`、`POST .../members/:sessionId/role`、`DELETE .../members/:sessionId`、`POST .../:id/handoff`
+- `GET|POST .../:id/tasks`、`POST .../tasks/:taskId/assign`、`POST .../tasks/:taskId/status`
+- `GET .../:id/workflow`、`POST .../workflow/start`、`POST .../workflow/advance`
+- `GET /api/sessions/:id/peek?lines=N`
+- `GET /workgroups/ws` —— 客户端发 `{type:"subscribe", workgroupId}`，任何变更收到 `{type:"workgroup.changed"}`（实时刷新），由 `appendTimeline` 发出的 `contextEvents` 驱动。
+
+> 这些接口沿用单 token 信任模型（§4.5）—— 暴露面与 `/sessions` 相同。加成员会在用户给定的文件夹里起进程，这与 `/ws create` 已有的能力一致。
+
+---
+
 ## 5. 内置 Adapter（v1）
 
 ### 5.1 `adapter-claude`
@@ -454,6 +480,20 @@ switchboard/
 
 ---
 
+### Phase 8 —— 多 AI 工作群  ✅ 完成于 2026-06-27
+**范围**：把 N 个并列会话升级为手机可遥控的多 AI 工作群 —— 共享上下文、任务分派、四步工作流、手动交接。见 §4.6。
+
+- [x] P0 文档：项目级 `AGENTS.md`/`CLAUDE.md`、README "相关项目"、SPEC §7 同步
+- [x] P1 CLI 扫描（`detect()` + `cli-scanner.ts` + `/api/scan`）+ 新增 `claude` 适配器
+- [x] P2 工作群模型 + 管理器 + 项目内 `.switchboard/` 共享上下文 + 前端
+- [x] P3 任务 + 分派 + 跨 AI peek + 任务看板
+- [x] P4 四步工作流模板
+- [x] P5 手动交接（想法#9；有意不做 token 自动切换 —— 无用量数据源）
+- [x] 工作群实时 WS 广播（`/workgroups/ws`）
+- [x] 闸门：`scripts/test-workgroups.ps1` —— 28/28 端到端检查通过（含重启持久化）
+
+---
+
 ## 9. 开放问题
 
 | # | 问题 | 何时需要决定 | 暂行答案 |
@@ -501,6 +541,7 @@ switchboard/
 5. **版本号**：每次有意义的变更在本文顶部递增版本。v0.x = 预发布，v1.0 = 首次 npm 发布。
 
 ### 近期变更
+- 2026-06-27 — v1.1 — **多 AI 工作群**（Phase 8、§4.6）：CLI 扫描 + `claude` 适配器；工作群模型（一文件夹一群、去重、Option-B 启动）；项目内 `.switchboard/` 共享上下文 + AGENTS/CLAUDE 注入；任务 + 分派 + peek；四步工作流；手动交接；实时 `/workgroups/ws` 广播；原子 JSON 持久化。`scripts/test-workgroups.ps1` 28/28 通过。有意不做 token 自动切换（无用量数据源）。
 - 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。
 - 2026-05-23 — v0.9 — **Phase 2 闸门通过**：跨手机 + 桌面的多客户端实地测试通过。Wrapper 在 headless 跑（没有本地 TTY）时尊重服务端驱动的 resize，所以后台 wrapper 正确采纳浏览器协商的 PTY 尺寸。快捷操作栏在 ≥ 600px 视口（有物理键盘）下隐藏。
 - 2026-05-23 — v0.8 — **多客户端会话尺寸**：`Session.attach()` 返回 `ClientHandle`；逐客户端跟踪视口；PTY 在所有 attach 客户端上 refit 到 `min(cols)` + `min(rows)`。修了"桌面视图在手机最后 attach 时变窄"和"手机在桌面也 attach 时看不到输入提示"两个问题。

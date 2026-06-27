@@ -37,6 +37,7 @@
 - [Alarm notifications (fall detection)](#alarm-notifications-fall-detection)
 - [Firewall — opening the port](#firewall--opening-the-port)
 - [Supported agents](#supported-agents)
+- [Workgroups (multi-AI)](#workgroups-multi-ai)
 - [FAQ](#faq)
 - [Project layout](#project-layout)
 - [License](#license)
@@ -431,6 +432,23 @@ If that works but the phone doesn't, the phone is on a different VLAN/SSID, or y
 
 Override the auto-detect with `--adapter <id>`. New adapter: implement the `AgentAdapter` interface from `@switchboard/sdk` and register it in `packages/server/src/server.ts`.
 
+## Workgroups (multi-AI)
+
+Run several AI CLIs against **one project with shared context**, driven from your phone. A *workgroup* is bound to a project folder; members are AI sessions that read/write a shared `.switchboard/` folder in that project.
+
+1. **Scan** — on the session list, tap **Agents** to see which AI CLIs are installed (Claude Code, Codex, Antigravity, …).
+2. **Create a workgroup** — tap **Workgroups → + New workgroup**, pick the project folder. One workgroup per folder; its shared memory accumulates across sessions.
+3. **Add AIs** — each starts in that folder. Toggle each member's role (active / observer / idle).
+4. **Tasks** — post a task and **dispatch** it to a member; **peek** any member's recent output.
+5. **Workflow** — run the built-in four-step SOP: planning → execution → audit → bugfix.
+6. **Handoff** — hand work from one AI to another with a note (writes `.switchboard/handoff.md`).
+
+Updates are **live** over WebSocket — open the same workgroup on two devices and they stay in sync.
+
+> **Heads-up:** creating a workgroup writes into the chosen project folder — a `.switchboard/` directory plus a small managed block in `AGENTS.md`/`CLAUDE.md` (so agents auto-read the shared context). Pick a folder you're OK with this in.
+
+Regression test: `powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1` (28 end-to-end checks). Design notes: `SPEC.md` §4.6.
+
 ## FAQ
 
 ### Phone shows "site can't be reached"
@@ -491,7 +509,8 @@ switchboard/
 │   └── camera/      # Optional: go2rtc sidecar for camera streaming
 ├── scripts/
 │   ├── install.sh   # Linux & macOS installer
-│   └── install.ps1  # Windows installer
+│   ├── install.ps1  # Windows installer
+│   └── test-workgroups.ps1  # end-to-end workgroup regression test
 ├── start.sh         # one-click dev launcher (Linux / macOS)
 ├── start.bat        # one-click dev launcher (Windows)
 ├── downloads/       # phone↔dev-box file-transfer drop folder (gitignored)
