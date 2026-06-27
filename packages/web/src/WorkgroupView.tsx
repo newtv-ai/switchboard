@@ -20,6 +20,7 @@ import {
   setTaskStatus,
   startWorkflow,
 } from './workgroups-api.js';
+import { WS_BASE } from './ws-url.js';
 
 export interface WorkgroupViewProps {
   id: string;
@@ -70,6 +71,46 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Live updates: subscribe to this workgroup and refresh on any change
+  // (from this client, another client, or an agent). Reconnect with backoff.
+  useEffect(() => {
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const connect = (): void => {
+      ws = new WebSocket(`${WS_BASE}/workgroups/ws`);
+      ws.onopen = () => {
+        attempts = 0;
+        ws?.send(JSON.stringify({ type: 'subscribe', workgroupId: id }));
+      };
+      ws.onmessage = (e: MessageEvent<string>) => {
+        try {
+          const m = JSON.parse(e.data) as { type?: string };
+          if (m.type === 'workgroup.changed') refresh();
+        } catch {
+          // ignore non-JSON frames
+        }
+      };
+      ws.onclose = () => {
+        if (disposed) return;
+        const delay = Math.min(1000 * 2 ** attempts, 10000);
+        attempts += 1;
+        timer = setTimeout(connect, delay);
+      };
+    };
+    connect();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      try {
+        ws?.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [id, refresh]);
 
   const wrap = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true);

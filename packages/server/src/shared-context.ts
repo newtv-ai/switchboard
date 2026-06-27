@@ -1,5 +1,14 @@
+import { EventEmitter } from 'node:events';
 import { access, appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+/**
+ * Fires the changed workgroup's `contextDir` whenever its timeline gets an event
+ * — i.e. on any workgroup mutation, since every mutation appends to the timeline.
+ * Drives the live WS broadcast (see workgroup-ws.ts).
+ */
+export const contextEvents = new EventEmitter();
+contextEvents.setMaxListeners(0);
 
 /**
  * Shared-context directory for a workgroup, materialized inside the project folder
@@ -106,7 +115,10 @@ export interface TimelineEvent {
 /** Append one structured event to the workgroup timeline (serialized). */
 export function appendTimeline(contextDir: string, event: TimelineEvent): Promise<void> {
   const p = join(contextDir, 'timeline.jsonl');
-  return serialize(p, () => appendFile(p, `${JSON.stringify(event)}\n`, 'utf8'));
+  return serialize(p, async () => {
+    await appendFile(p, `${JSON.stringify(event)}\n`, 'utf8');
+    contextEvents.emit('change', contextDir);
+  });
 }
 
 /** Append a Markdown entry to the workgroup handoff log (serialized). */

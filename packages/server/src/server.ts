@@ -21,6 +21,7 @@ import { type TaskStatus, TaskStore } from './task-store.js';
 import { WorkflowManager } from './workflow-manager.js';
 import { WorkgroupManager } from './workgroup-manager.js';
 import { WorkgroupStore } from './workgroup-store.js';
+import { bindWorkgroupWs } from './workgroup-ws.js';
 import { bindWrap } from './wrap-handler.js';
 import { bindWebSocket } from './ws-handler.js';
 
@@ -347,6 +348,12 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   // Browser/phone clients attach here.
   app.get('/ws', { websocket: true }, (socket) => {
     bindWebSocket(socket, sessions);
+  });
+
+  // Live workgroup events: a client subscribes to a workgroupId and receives
+  // { type: 'workgroup.changed' } whenever it mutates.
+  app.get('/workgroups/ws', { websocket: true }, (socket) => {
+    bindWorkgroupWs(socket, workgroups);
   });
 
   // Wrapper processes register here. Localhost-only — the wrapper is always
