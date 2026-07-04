@@ -317,14 +317,28 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
         clearTimeout(settleTimer);
         settleTimer = undefined;
       }
-      if (reportTimer !== undefined) clearTimeout(reportTimer);
+
+      // Leading + trailing: if nothing is already debouncing, report this size
+      // immediately, THEN still start the cooldown below to coalesce any further
+      // jitter. A pure trailing debounce delays the real PTY resize by up to
+      // 400ms after the mobile keyboard opens — long enough that a user who
+      // starts typing right away (e.g. a slash command) can have the resize's
+      // SIGWINCH land mid-keystroke, which can wipe out in-progress CLI UI state
+      // (the slash-command menu) before Enter is pressed. Reporting on the
+      // leading edge closes most of that race; the trailing report still catches
+      // the final settled size if it kept moving after the first event.
+      if (reportTimer === undefined) {
+        flushReport(cols, rows);
+      } else {
+        clearTimeout(reportTimer);
+      }
 
       // Use unified debounce: 150ms if cols changed (feels snappy on re-orientation/window resize),
       // 400ms for rows-only changes (completely absorbs transitional height changes during keyboard collapse)
       const delay = cols !== lastReportedCols ? 150 : 400;
       reportTimer = setTimeout(() => {
         reportTimer = undefined;
-        flushReport(cols, rows);
+        if (cols !== lastReportedCols || rows !== lastReportedRows) flushReport(cols, rows);
       }, delay);
     });
 
