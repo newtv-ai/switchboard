@@ -277,14 +277,6 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     // accumulates a duplicate per fit. The 500ms window absorbs scroll-driven
     // address-bar churn entirely and adds tolerable latency to keyboard pop.
     let reportTimer: ReturnType<typeof setTimeout> | undefined;
-    // Small mobile row wobbles (address-bar hide/show while scrolling) are held
-    // here instead of reported immediately. If a NEW onResize arrives before this
-    // fires, it's still churning — keep waiting. If it fires, the size has held
-    // steady for a full second, which real address-bar churn never does — so this
-    // is a genuine settled size (e.g. viewport restored after remote-control ends)
-    // and must be reported, or the PTY (and the content it renders) stays stuck at
-    // whatever size was last reported even though the client viewport looks correct.
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     const flushReport = (cols: number, rows: number): void => {
       lastReportedCols = cols;
       lastReportedRows = rows;
@@ -294,28 +286,27 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       if (cols === lastReportedCols && rows === lastReportedRows) return;
 
       const isNarrow = window.matchMedia('(max-width: 600px)').matches;
-      // On mobile, small row-only changes (e.g. <= 15 rows caused by large address
-      // bar hide/show) are usually transient scroll churn, not a deliberate resize —
-      // don't report them on the normal debounce. But don't drop them forever either:
-      // fall through to the settle timer below so a size that actually sticks still
-      // gets reported once it's clearly not churn.
+      // On mobile, ignore small row changes (e.g. <= 15 rows caused by large address
+      // bar hide/show) to prevent PTY resize storms (which causes history to append
+      // duplicate dumps). lastReportedRows is deliberately NOT updated on swallow,
+      // so a slow cumulative drift past the threshold still gets a single report.
+      //
+      // A version of this once tried to reconcile every swallowed delta via a
+      // trailing "settle" timer (report it anyway once it holds steady for 1s).
+      // That backfired badly: any residual sub-15-row jitter (e.g. from content
+      // reflow after a resize nudging the container by a pixel) would settle,
+      // get reported, cause a PTY resize + redraw, which could nudge the layout
+      // again — a self-sustaining loop that repeatedly resized the PTY every
+      // couple of seconds and reliably knocked the on-screen keyboard closed
+      // mid-typing. Permanently swallowing is the safer failure mode.
       if (
         isNarrow &&
-        cols === lastReportedCols &&
         Math.abs(rows - lastReportedRows) <= 15 &&
         Math.abs(rows - lastReportedRows) > 0
       ) {
-        if (settleTimer !== undefined) clearTimeout(settleTimer);
-        settleTimer = setTimeout(() => {
-          settleTimer = undefined;
-          flushReport(cols, rows);
-        }, 1000);
-        return;
-      }
-
-      if (settleTimer !== undefined) {
-        clearTimeout(settleTimer);
-        settleTimer = undefined;
+        if (cols === lastReportedCols) {
+          return;
+        }
       }
 
       if (reportTimer !== undefined) clearTimeout(reportTimer);
@@ -380,7 +371,6 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
       terminalEl.removeEventListener('wheel', handleWheel);
       if (refitTimer !== undefined) clearTimeout(refitTimer);
       if (reportTimer !== undefined) clearTimeout(reportTimer);
-      if (settleTimer !== undefined) clearTimeout(settleTimer);
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       cancelAnimationFrame(rafId);
       dataSub.dispose();
