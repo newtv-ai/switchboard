@@ -8,13 +8,31 @@ import './styles.css';
 function trackVisualViewport(): void {
   const vv = window.visualViewport;
   if (!vv) return;
+  let lastH = 0;
+  let raf = 0;
   const apply = (): void => {
-    document.documentElement.style.setProperty('--app-h', `${vv.height}px`);
+    // Debounce with rAF — mobile browsers fire resize/scroll events in rapid
+    // succession when the address bar animates.  Without this, the CSS var
+    // update triggers a full layout every frame, causing the visible "refresh"
+    // flicker on the home page even when idle.
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const h = vv.height;
+      // Only write the CSS property when the height actually changes by more
+      // than 1 CSS-px.  Sub-pixel jitter from the browser chrome sliding in
+      // and out is imperceptible but triggers expensive relayouts.
+      if (Math.abs(h - lastH) < 1) return;
+      lastH = h;
+      document.documentElement.style.setProperty('--app-h', `${h}px`);
+    });
   };
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
   window.addEventListener('orientationchange', apply);
-  apply();
+  // Initial measurement — no debounce needed.
+  lastH = vv.height;
+  document.documentElement.style.setProperty('--app-h', `${vv.height}px`);
 }
 trackVisualViewport();
 
