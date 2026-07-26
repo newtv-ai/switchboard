@@ -7,7 +7,7 @@
 #                                          for inbound TCP 8787 + 5173 (needs admin)
 #
 # What it does:
-#   1. Verifies Node.js >= 18.18 (errors with install hint if missing/too old).
+#   1. Verifies Node.js >= 22 (errors with install hint if missing/too old).
 #   2. `npm install` at the repo root (workspaces pull every sub-package).
 #   3. Builds @switchboard/sdk + core + server.
 #   4. `npm link` inside packages/server so the `sw` / `switchboard` binaries
@@ -38,15 +38,14 @@ function Write-Err2([string]$msg)   { Write-Host "[ERR] $msg"  -ForegroundColor 
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCmd) {
   Write-Err2 'node is not installed.'
-  Write-Host 'Install Node.js >= 18.18 (22 LTS recommended) from https://nodejs.org'
+  Write-Host 'Install Node.js >= 22 from https://nodejs.org'
   Write-Host 'Or via winget:  winget install OpenJS.NodeJS.LTS'
   exit 1
 }
 $nodeVer = (node -v).TrimStart('v')
-$parts = $nodeVer.Split('.')
-$major = [int]$parts[0]; $minor = [int]$parts[1]
-if ($major -lt 18 -or ($major -eq 18 -and $minor -lt 18)) {
-  Write-Err2 "node $nodeVer is too old. Need >= 18.18."
+$major = [int]$nodeVer.Split('.')[0]
+if ($major -lt 22) {
+  Write-Err2 "node $nodeVer is too old. Need >= 22."
   exit 1
 }
 Write-Ok "node v$nodeVer"

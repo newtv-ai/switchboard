@@ -32,7 +32,7 @@
     "dts": true,
     "clean": true,
     "sourcemap": true,
-    "target": "node18",
+    "target": "node22",
     "external": ["fastify", "@fastify/http-proxy"]
   }
 }

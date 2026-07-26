@@ -75,7 +75,7 @@ Full design in [SPEC.md](./SPEC.md).
 
 ## Install
 
-You need **Node.js ≥ 18.18** (22 LTS recommended). Then clone and run the installer for your OS.
+You need **Node.js 22 or newer**. Then clone and run the installer for your OS.
 
 ```bash
 git clone https://github.com/newtv-ai/switchboard.git

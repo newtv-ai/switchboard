@@ -75,7 +75,7 @@ Wrapper 把 CLI 在真实 PTY 里跑起来，把输出同时镜像到 **本机�
 
 ## 安装
 
-需要 **Node.js ≥ 18.18**（推荐 22 LTS）。克隆后运行对应平台的安装脚本即可。
+需要 **Node.js 22 或更高版本**。克隆后运行对应平台的安装脚本即可。
 
 ```bash
 git clone https://github.com/newtv-ai/switchboard.git

@@ -6,7 +6,7 @@
 #   ./scripts/install.sh --no-link      # install + build only, skip the global link
 #
 # What it does:
-#   1. Verifies Node.js >= 18.18 (errors with install hint if missing/too old).
+#   1. Verifies Node.js >= 22 (errors with install hint if missing/too old).
 #   2. `npm install` at the repo root (workspaces pulls every sub-package).
 #   3. Builds `@switchboard/sdk`, `@switchboard/core`, `@switchboard/server`
 #      (web is built separately when serving production; dev uses `vite dev`).
@@ -42,15 +42,14 @@ done
 # ─── 1. Node check ────────────────────────────────────────────────────────────
 if ! command -v node >/dev/null 2>&1; then
   red "node is not installed."
-  echo "Install Node.js >= 18.18 (22 LTS recommended). On macOS:  brew install node"
+  echo "Install Node.js >= 22. On macOS:  brew install node"
   echo "On Debian/Ubuntu:  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
   echo "On Arch:           sudo pacman -S nodejs npm"
   exit 1
 fi
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
-NODE_MINOR=$(node -p 'process.versions.node.split(".")[1]')
-if [ "$NODE_MAJOR" -lt 18 ] || { [ "$NODE_MAJOR" -eq 18 ] && [ "$NODE_MINOR" -lt 18 ]; }; then
-  red "node $(node -v) is too old. Need >= 18.18."
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  red "node $(node -v) is too old. Need >= 22."
   exit 1
 fi
 green "✓ node $(node -v)"
