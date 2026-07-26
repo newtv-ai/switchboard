@@ -21,6 +21,12 @@ function ApiPost($path, $obj) {
 function Start-Sb {
   $env:PORT = '8799'; $env:HOST = '127.0.0.1'; $env:LOG_LEVEL = 'error'
   $node = (Get-Command node).Source
+  # The script runs the built server, so a missing build otherwise shows up as
+  # 25 seconds of silence followed by every check failing.
+  if (-not (Test-Path (Join-Path $repo 'packages/server/dist/index.js'))) {
+    Write-Output "FAIL  server build missing - run 'npm run build:runtime' first"
+    exit 1
+  }
   $proc = Start-Process -FilePath $node -ArgumentList 'packages/server/dist/index.js' -WorkingDirectory $repo -PassThru -WindowStyle Hidden
   for ($i = 0; $i -lt 50; $i++) { Start-Sleep -Milliseconds 500; try { Invoke-RestMethod "$base/health" -TimeoutSec 2 | Out-Null; return $proc } catch {} }
   return $proc

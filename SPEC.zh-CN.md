@@ -2,7 +2,7 @@
 
 > **一部手机，管所有 AI 编程 CLI。** 自部署 Web 应用 + 插件化 adapter 系统 + 原生 PTY 中继。本文是设计的唯一源头。
 >
-> **状态**：v1.2 · 最近更新：2026-07-23 · 核心会话生命周期整改
+> **状态**：v1.3 · 最近更新：2026-07-26 · 核心会话生命周期整改 + 审计复审
 > **本文是单一事实来源。** 任何新功能、范围调整、架构决策**都必须在写代码之前/之中**反映到本文。如果实现和本文走偏，要么改本文，要么回滚实现。更新流程见 §11 变更日志。
 >
 > 🌐 **语言**: [English](./SPEC.md) · 中文
@@ -145,6 +145,8 @@
   - 发布会话生命周期变化（`created`、`updated`、`exited`、`removed`），让列表客户端无需轮询也能保持最新
   - Session 和 SessionManager 派发前快照监听器，回调中的清理或 detach 不会截断同一轮后续客户端通知
   - wrapper 传输短暂中断时保留原 Session，并允许 `WrapperBackend` 通道解绑后重新绑定
+  - 把这次中断告知客户端（`SessionSummary.connected`），中断期间拒绝写入，绝不静默丢弃输入
+  - 会话列表按创建时间倒序：实时推送的列表不能因为某个会话在刷输出就重排
 - **关键 API**：
   ```typescript
   class SessionManager {
@@ -177,6 +179,8 @@
   - `state` `{ state: AgentState }`
   - `exit` `{ code, signal? }`
   - `error` `{ message }`
+  - `pty-resize` `{ cols, rows }` —— 协商后的 PTY 尺寸已变
+  - `transport` `{ connected }` —— 该 Session 背后的 wrapper 掉线/恢复；为 false 时客户端禁用输入
 
 #### `/wrap` —— Wrapper 进程协议（Mode A）
 - **每次 wrapper 调用一条逻辑连接。** Wrapper 是 PTY 的拥有者；本地 PTY 持续运行时，底层 WS 可以断线重连。
@@ -196,8 +200,9 @@
 
 传输规则：
 - wrapper 重连退避上限为 10 秒；同一 server 进程内，断线 Session 保留 30 秒宽限期。
-- 重新绑定必须具备连接代际保护：旧 socket 的 close 不能解绑新连接；通过 `resumeKey` 校验的新连接可以替代旧传输，但不得创建重复 Session。
-- wrapper 传输断开期间不缓存浏览器输入；wrapper 可以保留有上限的 PTY 输出，并且只在 register/resume 成功后补发。
+- 重新绑定必须具备连接代际保护：旧 socket 的 close 不能解绑新连接；通过 `resumeKey` 校验的新连接可以替代旧传输，但不得创建重复 Session。替换顺序是先绑新、再释放旧句柄，避免把"根本没发生的中断"报给客户端。
+- 对能自证身份的 wrapper，`register` 是幂等的：记录仍在且 `resumeKey` 匹配时直接返回同一个 Session。这覆盖了"没收到 `registered` 回执、因而没有 sessionId 可 resume"的情况。
+- wrapper 传输断开期间不缓存浏览器输入：输入会被**拒绝并告知**（`transport` 帧 + 每次断开一条 `error`），而不是收下再丢掉；客户端在恢复前禁用输入。wrapper 可以保留有上限的 PTY 输出，并且只在 register/resume 成功后补发。
 - Switchboard server 正常关闭时不得 kill 由 wrapper 拥有的 PTY。server 重启后 resume 被拒，wrapper 自动注册新 Session，本地 CLI 不退出。
 
 对同一段 agent 输出，`pty` 和 `event` 可能同时发——`pty` 总是发；`event` 只在 adapter 有 parser 时发。客户端选择渲染哪一个。
@@ -278,8 +283,9 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 ```
 
 非空 `capabilities` 是结构化输出契约：adapter 必须提供
-`createParser()`。`SessionManager.registerAdapter()` 会拒绝没有 parser 的
-能力声明，避免 UI 展示运行时根本无法产生的事件。`/ws ready` 还会按该
+`createParser()`。`SessionManager.registerAdapter()` 会丢弃没有 parser 的
+能力声明并打告警，避免 UI 展示运行时根本无法产生的事件——manifest 写错的
+第三方 adapter 只会失去结构化能力，而不是让整个 server 起不来。`/ws ready` 还会按该
 Session 是否实际启用 parser 过滤能力（wrapped raw-TUI Session 不声明）。
 
 **稳定性承诺**：
@@ -312,7 +318,7 @@ Session 是否实际启用 parser 过滤能力（wrapped raw-TUI Session 不声�
 
 **工作群**把一个项目文件夹绑定到若干 agent 会话，让多个 AI CLI 共享上下文、从手机协同同一个项目。它是叠在 SessionManager 上的薄层 —— 成员就是按 id 引用的普通 Session。2026-06-27 新增（见 §8 Phase 8、§11）。
 
-- **模型**（`packages/core/src/workgroup.ts`）：`Workgroup { id, name, cwd, contextDir, members }`；`AgentMember { sessionId, adapterId, role: "active"|"observer"|"idle", joinedAt }`。
+- **模型**（`packages/core/src/workgroup.ts`）：`Workgroup { id, name, cwd, contextDir, members }`；`AgentMember { sessionId, adapterId, command?, role: "active"|"observer"|"idle", joinedAt }` —— `adapterId` 永远是已注册的 adapter（raw CLI 为 `passthrough`），`command` 承载无 adapter 成员的真实命令；界面显示 `command ?? adapterId`。
 - **一个文件夹一个工作群**（读法一）：`create()` 解析 cwd、**要求其存在**、并**按文件夹去重**（Windows/macOS 大小写不敏感），让项目共享记忆累积而非碎片化。默认名 = 文件夹 basename。
 - **成员按需启动**（Option B）：加成员即在工作群文件夹里 server-spawn 一个 CLI；有 adapter 的 CLI 走 `SessionManager.spawn`，扫描到但没有 adapter 的 CLI 走 `SessionManager.spawnRaw` 和 passthrough PTY。两者同时都是 `/sessions` 里的普通会话。
 - **共享上下文 = 项目内 Markdown**，位于 `<cwd>/.switchboard/`（`context.md`、`decisions.md`、`handoff.md`、`artifacts/`、`timeline.jsonl`）—— 跨 agent 协议（参照 CCB 的 `.ccb/`）。建群时往项目 `AGENTS.md`/`CLAUDE.md` 注入带标记、幂等的块，让成员自动读它。每文件写操作串行化（单写者队列）。
@@ -337,11 +343,11 @@ Session 是否实际启用 parser 过滤能力（wrapped raw-TUI Session 不声�
 文件管理器把完整文件存到 `<repo-root>/downloads/`。大文件上传不再直接
 append 最终文件名，而使用小型会话协议：
 
-- `POST /api/uploads` 用 `filename`、`totalSize`、`totalChunks` 创建上传会话并保留文件名。
+- `POST /api/uploads` 用 `filename`、`totalSize`、`totalChunks`（可选 `chunkSize`、`overwrite`）创建上传会话并保留文件名。分块大小由客户端在服务端上限内自行声明，两边不再被同一个常量焊死。
 - `POST /api/uploads/:uploadId/chunks/:index` 把一个幂等分块写到公开下载目录之外；单块最大 5 MiB。
 - `POST /api/uploads/:uploadId/complete` 校验分块数和总大小，按序组装后原子发布最终文件。
 - `DELETE /api/uploads/:uploadId` 取消上传并清除临时状态。
-- 已存在的文件名或同名并发上传返回 `409`，不静默覆盖成品。
+- 已存在的文件名或同名并发上传返回 `409`，并带机器可读的 `code`（`file-exists` / `upload-in-progress`），不静默覆盖成品。`overwrite: true` 会原子替换已有文件，且只在 `file-exists` 时才向用户提供该选项。
 - 未完成上传不会出现在文件列表或下载接口中；进程内会话空闲一小时后释放文件名，server 启动时清理超过 24 小时的临时目录。
 - 完成结果保留五分钟幂等窗口，客户端可在成品已发布但最终响应丢失时重试。
 
@@ -572,6 +578,7 @@ switchboard/
 5. **版本号**：每次有意义的变更在本文顶部递增版本。v0.x = 预发布，v1.0 = 首次 npm 发布。
 
 ### 近期变更
+- 2026-07-26 — v1.3 — **审计复审修复**（针对 v1.2 整改的复审）：wrapped Session 传输断开时不再静默吞掉输入——新增 `SessionSummary.connected`、`/ws` 的 `transport` 帧、被拒绝的写入，以及界面上的 "wrapper offline" 标记。没收到 `registered` 回执的 wrapper 可凭 resumeKey 重新注册回同一个 Session，不必干等宽限期。会话列表按创建时间排序，实时更新不会让行在手指下重排。声明了 capability 却没有 parser 的 adapter 只会被降级并告警，不再让 server 启动失败。`AgentMember.command` 把 raw CLI 的命令与 adapter id 分开。上传改为由客户端声明 `chunkSize`、返回机器可读的错误 `code`，并支持显式 `overwrite` 原子覆盖。
 - 2026-07-23 — v1.2 — **核心可靠性整改**：列表模式 `/ws` 客户端实时收到 Session 快照，纯活动时间更新按 Session 节流；监听器按快照派发，清理不会吞掉浏览器退出帧；浏览器发送能容忍 socket 关闭竞态。wrapper 传输采用稳定进程标识与恢复凭据、带代际保护的后端重新绑定、30 秒 server 宽限期、有上限的 PTY 输出缓冲、封顶退避和限时退出帧 flush。server 正常关闭时保留 wrapper 拥有的 PTY；server 重启后拒绝旧 resume，wrapper 自动注册新 Session。扫描到但无 adapter 的 CLI 现在可通过 raw passthrough 加入工作群；结构化 capability 必须有 parser；安装器按明确依赖顺序构建 Camera；文件上传改为隐藏分块会话和原子发布；运行时基线统一为 Node.js 22+。新增 Node/tsx 生命周期与上传测试，覆盖真实传输连续十次闪断及 server 重启恢复。
 - 2026-06-27 — v1.1 — **多 AI 工作群**（Phase 8、§4.6）：CLI 扫描 + `claude` 适配器；工作群模型（一文件夹一群、去重、Option-B 启动）；项目内 `.switchboard/` 共享上下文 + AGENTS/CLAUDE 注入；任务 + 分派 + peek；四步工作流；手动交接；实时 `/workgroups/ws` 广播；原子 JSON 持久化。`scripts/test-workgroups.ps1` 28/28 通过。有意不做 token 自动切换（无用量数据源）。
 - 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。

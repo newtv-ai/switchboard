@@ -6,7 +6,7 @@
 [![Agents](https://img.shields.io/badge/agents-Claude%20%7C%20Codex%20%7C%20Antigravity-blue.svg)](#supported-agents)
 [![Plugin API](https://img.shields.io/badge/plugin%20API-public-purple.svg)](./packages/sdk)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-LAN%20%2F%20Tailscale-brightgreen.svg)](#phone-access-lan--tailscale)
-[![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
 [![Status](https://img.shields.io/badge/status-1.0.0-brightgreen.svg)](./SPEC.md)
 
 🌐 **Languages**: English · [中文](./README.zh-CN.md)
@@ -60,7 +60,7 @@ A typical session:
 └─────────────────────────────────────┘         └─────────────────────────┘
 ```
 
-The wrapper spawns the CLI in a real PTY, mirrors output to **both** your local terminal and any connected phone/desktop browser, and forwards input either direction. Closing the phone browser doesn't kill the session; your desktop terminal keeps working. A temporary wrapper WebSocket drop reconnects automatically without creating a duplicate Session; after a Switchboard server restart, the same local CLI registers as a new Session and keeps running.
+The wrapper spawns the CLI in a real PTY, mirrors output to **both** your local terminal and any connected phone/desktop browser, and forwards input either direction. Closing the phone browser doesn't kill the session; your desktop terminal keeps working. A temporary wrapper WebSocket drop reconnects automatically without creating a duplicate Session; while it is down the phone shows **wrapper offline** and refuses input instead of swallowing it. After a Switchboard server restart, the same local CLI registers as a new Session and keeps running.
 
 **Or start cold from the phone** — if nothing is wrapped yet, tap **+ New passthrough session** in the web UI to spawn a fresh shell on the dev box, then launch `claude` / `codex` / anything in it. No SSH client on the phone, no need to wake the desktop.
 
@@ -102,7 +102,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 What the installer does:
 1. Verifies Node version.
 2. `npm install` (workspaces handle every package).
-3. Builds `@switchboard/sdk`, `@switchboard/core`, `@switchboard/server`.
+3. Builds every runtime package (`sdk`, `core`, `camera`, `server`) in dependency order.
 4. `npm link` so the `sw` and `switchboard` commands are on your PATH.
 
 **node-pty native build (Windows only):** if `npm install` fails on `node-pty`, install [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, then re-run the installer.
@@ -158,6 +158,7 @@ Open the web UI and click **Upload** in the header — this opens a small file m
 
 - **Phone → dev box**: pick one or more files and upload them. Files land in `<repo-root>/downloads/` on the dev box. Uploads use 5 MB chunks and appear only after every chunk is verified and atomically published; interrupted transfers never show up as completed files.
 - **Dev box → phone**: click **Download** next to any file in the list; the browser saves it through its normal download flow.
+- Uploading a name that already exists asks before replacing it — the replacement is atomic, so a failed retry never leaves a half-written file behind.
 
 This is intentionally a single shared folder per dev box, with no auth — same trust model as the rest of Switchboard (bind to LAN / Tailscale only).
 

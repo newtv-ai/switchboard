@@ -6,7 +6,7 @@
 [![Agents](https://img.shields.io/badge/agents-Claude%20%7C%20Codex%20%7C%20Antigravity-blue.svg)](#支持的-agent)
 [![Plugin API](https://img.shields.io/badge/plugin%20API-public-purple.svg)](./packages/sdk)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-LAN%20%2F%20Tailscale-brightgreen.svg)](#手机访问局域网--tailscale)
-[![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
 [![Status](https://img.shields.io/badge/status-1.0.0-brightgreen.svg)](./SPEC.md)
 
 🌐 **语言**: [English](./README.md) · 中文
@@ -60,7 +60,7 @@
 └─────────────────────────────────────┘         └──────────────────────────┘
 ```
 
-Wrapper 把 CLI 在真实 PTY 里跑起来，把输出同时镜像到 **本机终端 和 所连的手机/浏览器**，输入双向转发。手机浏览器关掉不会杀掉会话；桌面终端照常继续。wrapper WebSocket 短暂断开时会自动恢复原 Session，不会产生重复会话；Switchboard server 重启后，同一个本地 CLI 会注册为新 Session 并继续运行。
+Wrapper 把 CLI 在真实 PTY 里跑起来，把输出同时镜像到 **本机终端 和 所连的手机/浏览器**，输入双向转发。手机浏览器关掉不会杀掉会话；桌面终端照常继续。wrapper WebSocket 短暂断开时会自动恢复原 Session，不会产生重复会话；断开期间手机会显示 **wrapper offline** 并拒绝输入，不会把你敲的字悄悄吞掉。Switchboard server 重启后，同一个本地 CLI 会注册为新 Session 并继续运行。
 
 **或从手机直接冷启动** —— 开发机上还没有 wrap 任何进程时，在 Web UI 里点 **+ New passthrough session**，开发机会拉起一个新 shell；进去后敲 `claude` / `codex` / 任意命令即可。手机不需要装 SSH，也无需先把桌面唤醒。
 
@@ -102,7 +102,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 安装脚本做了什么：
 1. 校验 Node 版本。
 2. `npm install`（workspaces 一次装好所有包）。
-3. 编译 `@switchboard/sdk`、`@switchboard/core`、`@switchboard/server`。
+3. 按依赖顺序编译全部运行时包（`sdk`、`core`、`camera`、`server`）。
 4. `npm link`，把 `sw` 和 `switchboard` 命令挂到 PATH 上。
 
 **Windows 下 node-pty 原生编译失败时**：装 [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 并勾选 "Desktop development with C++" 工作负载，然后重跑安装脚本。
@@ -158,6 +158,7 @@ npm run build -w @switchboard/web
 
 - **手机 → 开发机**：选一个或多个文件上传，文件落在开发机的 `<仓库根目录>/downloads/` 下。上传按 5 MB 分块，全部分块校验完成并原子发布后才出现在列表里；中断传输不会伪装成完整文件。
 - **开发机 → 手机**：在列表里点 **Download**，按浏览器正常下载流程保存。
+- 上传同名文件会先询问是否覆盖；覆盖是原子的，失败重试不会留下半个文件。
 
 这就是一个共享目录，没有鉴权——和 Switchboard 其他部分一致，只在局域网 / Tailscale 上跑。
 

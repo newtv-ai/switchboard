@@ -2,7 +2,7 @@
 
 > **One phone, every AI coding CLI.** Self-hostable web app + plugin-based adapter system + native PTY relay. This document is the design source of truth.
 >
-> **Status**: v1.2 · Last updated: 2026-07-23 · Core session lifecycle remediation
+> **Status**: v1.3 · Last updated: 2026-07-26 · Core session lifecycle remediation + audit review
 > **This document is the single source of truth.** Any new feature, scope change, or architectural decision MUST be reflected here before/during implementation. If implementation drifts from this doc, the doc is fixed (or the implementation is rolled back). See §11 Change Log for how to update.
 >
 > 🌐 **Languages**: English · [中文](./SPEC.zh-CN.md)
@@ -145,6 +145,8 @@ The rest of the system (Session, SessionManager, parsers, actions, UI) is identi
   - Publish session lifecycle changes (`created`, `updated`, `exited`, `removed`) so list-only clients stay current without polling
   - Snapshot Session and SessionManager listeners before dispatch so cleanup or detach during a callback cannot suppress later clients in the same dispatch
   - Preserve wrapped Sessions during a short transport outage while their `WrapperBackend` channel is unbound/rebound
+  - Report that outage to clients (`SessionSummary.connected`) and refuse writes while it lasts, so input is never silently dropped
+  - List sessions newest-first by creation time — a live-updating list must not reorder itself as sessions print output
 - **Key API**:
   ```typescript
   class SessionManager {
@@ -177,6 +179,8 @@ Two WS endpoints, different purposes:
   - `state` `{ state: AgentState }`
   - `exit` `{ code, signal? }`
   - `error` `{ message }`
+  - `pty-resize` `{ cols, rows }` — the negotiated PTY size changed
+  - `transport` `{ connected }` — the wrapper behind this Session lost (or regained) its socket; clients disable input while false
 
 #### `/wrap` — Wrapper-process protocol (Mode A)
 - **One logical connection per wrapper invocation.** The wrapper IS the PTY owner; its WS transport may reconnect while the local PTY keeps running.
@@ -196,8 +200,9 @@ Two WS endpoints, different purposes:
 
 Transport rules:
 - Wrapper reconnect backoff is capped at 10 seconds. A disconnected Session is retained for a 30-second grace period in the same server process.
-- Rebinding is generation-safe: a stale socket close cannot unbind a newer connection, and a newer authenticated connection supersedes the old transport without creating a duplicate Session.
-- Browser input is not queued while the wrapper transport is disconnected. The wrapper may retain a bounded amount of PTY output and flush it only after registration/resume succeeds.
+- Rebinding is generation-safe: a stale socket close cannot unbind a newer connection, and a newer authenticated connection supersedes the old transport without creating a duplicate Session. Superseding is bind-then-release, so a replaced connection never reports an outage that did not happen.
+- `register` is idempotent for a wrapper that proves its identity: if the record still exists and the `resumeKey` matches, the same Session is handed back. That covers the wrapper that never received its `registered` ack and therefore has no sessionId to resume with.
+- Browser input is not queued while the wrapper transport is disconnected. It is **refused and reported** (`transport` frame, one `error` per outage) rather than accepted and dropped; the client disables input until the transport returns. The wrapper may retain a bounded amount of PTY output and flush it only after registration/resume succeeds.
 - A graceful Switchboard server shutdown never kills a wrapped PTY owned by the wrapper process. After restart, resume is rejected and the wrapper automatically registers a new Session while the local CLI continues running.
 
 Both `pty` and `event` may be sent for the same agent output — `pty` is always sent; `event` is sent only if the adapter has a parser. Clients choose which to render.
@@ -278,9 +283,10 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 ```
 
 A non-empty `capabilities` list is a structured-output contract: the adapter
-must provide `createParser()`. `SessionManager.registerAdapter()` rejects
-capability claims without a parser so the UI never advertises events the
-runtime cannot emit. The `/ws ready` message further filters capabilities by
+must provide `createParser()`. `SessionManager.registerAdapter()` drops such a
+claim (with a warning) so the UI never advertises events the runtime cannot
+emit — a third-party adapter with a bad manifest loses its structured features
+rather than stopping the server from booting. The `/ws ready` message further filters capabilities by
 whether that specific Session enabled its parser (wrapped raw-TUI Sessions do not).
 
 **Stability contract**:
@@ -316,7 +322,7 @@ on-disk context, so multiple AI CLIs can work the same project from a phone. It'
 a thin layer over the SessionManager — members are ordinary Sessions referenced by
 id. Added 2026-06-27 (see §8 Phase 8, §11).
 
-- **Model** (`packages/core/src/workgroup.ts`): `Workgroup { id, name, cwd, contextDir, members }`; `AgentMember { sessionId, adapterId, role: "active"|"observer"|"idle", joinedAt }`.
+- **Model** (`packages/core/src/workgroup.ts`): `Workgroup { id, name, cwd, contextDir, members }`; `AgentMember { sessionId, adapterId, command?, role: "active"|"observer"|"idle", joinedAt }` — `adapterId` always names a registered adapter (`passthrough` for raw CLIs) and `command` carries the actual CLI for adapter-less members; the UI shows `command ?? adapterId`.
 - **One workgroup per project folder** (read-one model): `create()` resolves the cwd, **requires it to exist**, and **dedupes by folder** (case-insensitive on Windows/macOS) so a project's shared memory accumulates instead of fragmenting. Default name = folder basename.
 - **Members spawn on demand** (Option B): adding a member server-spawns a CLI in the workgroup's folder; adapter-backed CLIs use `SessionManager.spawn`, while detected CLIs without an adapter use `SessionManager.spawnRaw` and the passthrough PTY backend. Both are normal entries in `/sessions`.
 - **Shared context = project-local Markdown** at `<cwd>/.switchboard/` (`context.md`, `decisions.md`, `handoff.md`, `artifacts/`, `timeline.jsonl`) — the cross-agent protocol (cf. CCB's `.ccb/`). On create, an idempotent managed block is injected into the project's `AGENTS.md` and `CLAUDE.md` so agents auto-read it. Per-file writes are serialized (single-writer queue).
@@ -342,11 +348,11 @@ The file manager stores completed files under `<repo-root>/downloads/`. Large
 uploads use a small session protocol instead of appending directly to the final
 filename:
 
-- `POST /api/uploads` creates a manifest (`filename`, `totalSize`, `totalChunks`) and reserves the filename.
+- `POST /api/uploads` creates a manifest (`filename`, `totalSize`, `totalChunks`, optional `chunkSize` and `overwrite`) and reserves the filename. The client declares its own chunk size, bounded by the server maximum, so the two sides are not coupled to one constant.
 - `POST /api/uploads/:uploadId/chunks/:index` stores one idempotent chunk outside the public downloads directory. Chunks are capped at 5 MiB.
 - `POST /api/uploads/:uploadId/complete` verifies chunk count and total size, assembles in order, then atomically publishes the final file.
 - `DELETE /api/uploads/:uploadId` cancels and removes partial state.
-- Existing filenames and concurrent uploads for the same name return `409`; uploads never silently overwrite a completed file.
+- Existing filenames and concurrent uploads for the same name return `409` with a machine-readable `code` (`file-exists` vs `upload-in-progress`); uploads never silently overwrite a completed file. `overwrite: true` replaces an existing file atomically, and is offered to the user only for `file-exists`.
 - Partial uploads are not listed or downloadable. In-process sessions idle for one hour release their filename; stale temporary directories are cleaned after 24 hours on server startup.
 - Completion is idempotent for five minutes, allowing a client to retry when the final response is lost after publication.
 
@@ -581,6 +587,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
+- 2026-07-26 — v1.3 — **Audit review follow-ups** (review of the v1.2 remediation): a wrapped Session now reports transport loss instead of silently dropping input — `SessionSummary.connected`, a `transport` frame on `/ws`, refused writes, and a "wrapper offline" marker in the UI. A wrapper that never saw its `registered` ack re-registers onto the same Session (proven by resumeKey) instead of waiting out the grace period. The session list is ordered by creation time so live updates cannot reorder rows under a tapping finger. A capability claim without a parser is dropped with a warning rather than aborting server startup. `AgentMember.command` separates a raw CLI's command from its adapter id. Uploads take the client's `chunkSize`, return a machine-readable error `code`, and support an explicit `overwrite` that replaces atomically.
 - 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Adapter-less scanned CLIs now start in Workgroups through raw passthrough; structured capabilities require a parser; installers build Camera in explicit dependency order; file uploads use hidden chunk sessions and atomic publication. Runtime support is aligned to Node.js 22+. Added Node/tsx lifecycle and upload tests, including ten consecutive real transport drops and server-restart recovery.
 - 2026-06-27 — v1.1 — **Multi-AI Workgroups** (Phase 8, §4.6): CLI scan + `claude` adapter; workgroup model (one-per-folder, dedupe, Option-B spawn); project-local `.switchboard/` shared context with AGENTS/CLAUDE injection; tasks + dispatch + peek; four-step workflow; manual handoff; live `/workgroups/ws` broadcast; atomic JSON persistence. `scripts/test-workgroups.ps1` 28/28 green. Token auto-switch intentionally not built (no usage-data source).
 - 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector, distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
