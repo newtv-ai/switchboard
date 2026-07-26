@@ -71,7 +71,19 @@ export class SessionManager {
       throw new Error(`Adapter already registered: ${id}`);
     }
     if (adapter.manifest.capabilities.length > 0 && !adapter.createParser) {
-      throw new Error(`Adapter ${id} declares structured capabilities without a parser`);
+      // A capability claim with no parser can never emit the events it
+      // promises, so the UI must not advertise it. Drop the claim rather than
+      // throwing: a third-party adapter with a bad manifest should lose its
+      // structured features, not take the whole server down at startup.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[switchboard] adapter "${id}" declares capabilities (${adapter.manifest.capabilities.join(', ')}) but has no createParser(); ignoring them`,
+      );
+      this.adapters.set(id, {
+        ...adapter,
+        manifest: { ...adapter.manifest, capabilities: [] },
+      });
+      return;
     }
     this.adapters.set(id, adapter);
   }
@@ -163,29 +175,20 @@ export class SessionManager {
     return this.sessions.get(id);
   }
 
+  /**
+   * Newest first, by creation time. Deliberately NOT by lastActivityAt: the
+   * list is pushed live now, and sorting by activity makes rows swap places
+   * under the user's finger every time a session prints something.
+   */
   list(): SessionSummary[] {
     return Array.from(this.sessions.values())
       .map((s) => s.summary())
-      .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   subscribe(listener: SessionManagerListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
-
-  async killAll(): Promise<void> {
-    for (const s of this.sessions.values()) {
-      try {
-        s.kill();
-      } catch {
-        // process may already be dead
-      }
-      s.dispose();
-    }
-    this.sessions.clear();
-    this.clearActivityTimers();
-    this.listeners.clear();
   }
 
   /**

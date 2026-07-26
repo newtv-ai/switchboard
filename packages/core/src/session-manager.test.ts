@@ -126,16 +126,46 @@ test('notifies attached clients before manager cleanup disposes an exited Sessio
   assert.equal(manager.get(session.id), undefined);
 });
 
-test('rejects structured capability claims when the adapter has no parser', () => {
+test('drops structured capability claims when the adapter has no parser', () => {
   const manager = new SessionManager();
-  assert.throws(
-    () =>
-      manager.registerAdapter({
-        ...adapter,
-        manifest: { ...adapter.manifest, capabilities: ['tool-use'] },
-      }),
-    /declares structured capabilities without a parser/,
-  );
+  const warnings: unknown[][] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    manager.registerAdapter({
+      ...adapter,
+      manifest: { ...adapter.manifest, capabilities: ['tool-use'] },
+    });
+  } finally {
+    console.warn = realWarn;
+  }
+
+  // Registering still succeeds — a bad third-party manifest must not stop the
+  // server from booting — but the claim never reaches a client.
+  assert.deepEqual(manager.listAdapters()[0]?.capabilities, []);
+  assert.equal(warnings.length, 1);
+});
+
+test('lists sessions newest-first so live updates cannot reorder rows', async () => {
+  const manager = new SessionManager();
+  manager.registerAdapter(adapter);
+  const olderBackend = new FakeBackend();
+  const older = manager.register({ adapterId: 'test', cwd: process.cwd(), backend: olderBackend });
+  await delay(2);
+  const newer = manager.register({
+    adapterId: 'test',
+    cwd: process.cwd(),
+    backend: new FakeBackend(),
+  });
+
+  const order = (): string[] => manager.list().map((s) => s.id);
+  assert.deepEqual(order(), [newer.id, older.id]);
+
+  // Output on the older session must not make its row jump to the top.
+  olderBackend.pushData('chatty');
+  assert.deepEqual(order(), [newer.id, older.id]);
+
+  await manager.shutdown();
 });
 
 test('exposes structured capabilities only when that Session enables its parser', async () => {
