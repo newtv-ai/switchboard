@@ -87,8 +87,22 @@ export class WrapperRegistry {
     } else {
       throw new Error('wrapperId and resumeKey must be provided together');
     }
-    if (this.records.has(wrapperId)) {
-      throw new Error('wrapper is already registered; use resume');
+    const existing = this.records.get(wrapperId);
+    if (existing) {
+      if (!equalSecret(existing.resumeKey, resumeKey)) {
+        throw new Error('wrapper is already registered; use resume');
+      }
+      if (this.sessions.get(existing.session.id) === existing.session) {
+        // Same wrapper, proven by its resumeKey, registering again: it never
+        // saw our `registered` ack (lost response, or a half-open socket the
+        // server has not reaped yet), so it cannot know its sessionId and
+        // cannot resume. Hand back the same record instead of refusing until
+        // the grace period expires — otherwise the phone shows a live session
+        // whose output goes nowhere for 30 s and then reports a false exit.
+        return existing;
+      }
+      // Credentials match but the Session is gone: nothing left to reuse.
+      this.forget(existing);
     }
 
     const backend = new WrapperBackend();
@@ -144,11 +158,16 @@ export class WrapperRegistry {
 
     const previousConnectionId = record.activeConnectionId;
     const previousClose = record.closeTransport;
-    record.unbindTransport?.();
+    const previousUnbind = record.unbindTransport;
 
     record.activeConnectionId = connectionId;
     record.closeTransport = closeTransport;
+    // Bind the replacement before releasing the old handle. The old unbind is
+    // generation-scoped, so by now it is a no-op — which is the point: a
+    // superseded connection must not report a transport outage that never
+    // happened (the phone would flash "wrapper offline" for one frame).
     record.unbindTransport = record.backend.bind(outgoing);
+    previousUnbind?.();
     record.backend.setLocalSize(
       viewport.hasLocalViewport ? { cols: viewport.cols, rows: viewport.rows } : undefined,
     );
@@ -182,6 +201,11 @@ export class WrapperRegistry {
     if (this.records.get(record.wrapperId) !== record) return;
     if (record.activeConnectionId !== connectionId) return;
 
+    this.forget(record);
+    record.backend.pushExit(code, signal);
+  }
+
+  private forget(record: WrapperRecord): void {
     if (record.disconnectTimer) clearTimeout(record.disconnectTimer);
     record.disconnectTimer = undefined;
     record.unbindTransport?.();
@@ -189,19 +213,10 @@ export class WrapperRegistry {
     record.activeConnectionId = undefined;
     record.closeTransport = undefined;
     this.records.delete(record.wrapperId);
-    record.backend.pushExit(code, signal);
   }
 
   dispose(): void {
-    for (const record of this.records.values()) {
-      if (record.disconnectTimer) clearTimeout(record.disconnectTimer);
-      record.unbindTransport?.();
-      record.disconnectTimer = undefined;
-      record.unbindTransport = undefined;
-      record.activeConnectionId = undefined;
-      record.closeTransport = undefined;
-    }
-    this.records.clear();
+    for (const record of [...this.records.values()]) this.forget(record);
   }
 }
 

@@ -154,6 +154,46 @@ test('server restart rejects resume, then accepts a fresh registration without k
   await newManager.shutdown();
 });
 
+test('a wrapper that lost the registered ack re-registers onto the same Session', async () => {
+  const manager = createManager();
+  const registry = new WrapperRegistry(manager, { gracePeriodMs: 5000 });
+  const first = new FakeSocket();
+  bind(first, registry);
+  const sessionId = register(first);
+
+  // The ack never reached the wrapper, so it reconnects knowing only its own
+  // identity — no sessionId to resume with — while the server still holds the
+  // old record (half-open socket, close not seen yet).
+  const second = new FakeSocket();
+  bind(second, registry);
+  const reused = register(second);
+
+  assert.equal(reused, sessionId, 'must not strand the live PTY on a new Session');
+  assert.equal(manager.list().length, 1);
+  // The superseded socket is closed by the registry, not left dangling.
+  assert.equal(first.readyState, 3);
+
+  // A different wrapper claiming the same id without the key is still refused.
+  const impostor = new FakeSocket();
+  bind(impostor, registry);
+  impostor.receive({
+    type: 'register',
+    wrapperId: 'wrapper-1',
+    resumeKey: 'wrong-key',
+    adapterId: 'passthrough',
+    cwd: process.cwd(),
+    cols: 80,
+    rows: 24,
+    command: 'test-cli',
+    args: [],
+  });
+  assert.equal(impostor.sent.at(-1)?.type, 'error');
+  assert.equal(manager.list().length, 1);
+
+  registry.dispose();
+  await manager.shutdown();
+});
+
 test('pre-v1.2 wrappers can still perform a one-connection registration', async () => {
   const manager = createManager();
   const registry = new WrapperRegistry(manager, { gracePeriodMs: 20 });
