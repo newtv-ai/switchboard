@@ -14,6 +14,7 @@
     "build:runtime": "npm run build -w @switchboard/sdk && npm run build -w @switchboard/core && npm run build -w @switchboard/camera && npm run build -w @switchboard/server",
     "dev": "concurrently -k -n server,web -c blue,green \"npm run dev -w @switchboard/server\" \"npm run dev -w @switchboard/web\"",
     "typecheck": "npm run build:runtime && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:runtime && tsx --test packages/core/src/session-manager.test.ts packages/core/src/wrapper-backend.test.ts packages/server/src/ws-handler.test.ts packages/server/src/wrap-handler.test.ts packages/server/src/wrapper-cli.integration.test.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write ."
   },

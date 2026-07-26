@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename as pathBasename } from 'node:path';
@@ -90,10 +91,17 @@ export async function runWrapper(argv: string[]): Promise<void> {
   const sessionName = opts.name ?? defaultName;
 
   const wsUrl = `${opts.serverUrl}/wrap`;
-  const ws = new WebSocket(wsUrl);
-
-  let connected = false;
+  const wrapperId = randomUUID();
+  const resumeKey = randomBytes(32).toString('base64url');
+  let ws: WebSocket | undefined;
+  let sessionId: string | undefined;
+  let transportReady = false;
   let exited = false;
+  let reconnectTimer: NodeJS.Timeout | undefined;
+  let reconnectAttempts = 0;
+  const pendingPty: Array<{ data: string; bytes: number }> = [];
+  let pendingPtyBytes = 0;
+  const MAX_PENDING_PTY_BYTES = 2 * 1024 * 1024;
   // After a server-driven resize we write `CSI 8;rows;cols t` so the local
   // Windows Terminal physically follows the new PTY size — without this the
   // window stays at its old size and the new content clips or leaves blank
@@ -120,12 +128,33 @@ export async function runWrapper(argv: string[]): Promise<void> {
     return true;
   };
 
-  const sendWs = (msg: WrapClientMessage): void => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+  const sendWs = (msg: WrapClientMessage): boolean => {
+    const socket = ws;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
     try {
-      ws.send(JSON.stringify(msg));
+      socket.send(JSON.stringify(msg));
+      return true;
     } catch {
-      // ignore — connection going down
+      return false;
+    }
+  };
+
+  const queuePty = (data: string): void => {
+    const bytes = Buffer.byteLength(data);
+    pendingPty.push({ data, bytes });
+    pendingPtyBytes += bytes;
+    while (pendingPtyBytes > MAX_PENDING_PTY_BYTES && pendingPty.length > 0) {
+      const dropped = pendingPty.shift();
+      pendingPtyBytes -= dropped?.bytes ?? 0;
+    }
+  };
+
+  const flushPendingPty = (): void => {
+    while (transportReady && pendingPty.length > 0) {
+      const next = pendingPty[0];
+      if (!next || !sendWs({ type: 'pty', data: next.data })) return;
+      pendingPty.shift();
+      pendingPtyBytes -= next.bytes;
     }
   };
 
@@ -143,14 +172,41 @@ export async function runWrapper(argv: string[]): Promise<void> {
   const cleanup = (code: number, signal?: number): void => {
     if (exited) return;
     exited = true;
-    sendWs({ type: 'exit', code, signal });
-    try {
-      ws.close();
-    } catch {
-      // ignore
-    }
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
     restoreTerminal();
-    process.exit(code);
+
+    let finalized = false;
+    const finalize = (): void => {
+      if (finalized) return;
+      finalized = true;
+      try {
+        ws?.close();
+      } catch {
+        // ignore
+      }
+      process.exit(code);
+    };
+
+    const socket = ws;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      finalize();
+      return;
+    }
+
+    const flushTimeout = setTimeout(finalize, 250);
+    try {
+      socket.send(
+        JSON.stringify({ type: 'exit', code, signal } satisfies WrapClientMessage),
+        () => {
+          clearTimeout(flushTimeout);
+          finalize();
+        },
+      );
+    } catch {
+      clearTimeout(flushTimeout);
+      finalize();
+    }
   };
 
   // hasLocalViewport tells the server whether wrapper's stdout corresponds to
@@ -158,81 +214,138 @@ export async function runWrapper(argv: string[]): Promise<void> {
   // PowerShell; false when wrapper runs headless (background / piped).
   const hasLocalViewport = Boolean(process.stdin.isTTY);
 
-  ws.on('open', () => {
-    connected = true;
+  const currentViewport = (): { cols: number; rows: number } => ({
+    cols: process.stdout.columns || cols,
+    rows: process.stdout.rows || rows,
+  });
+
+  const sendHandshake = (): void => {
+    const viewport = currentViewport();
+    if (sessionId) {
+      sendWs({
+        type: 'resume',
+        wrapperId,
+        resumeKey,
+        sessionId,
+        ...viewport,
+        hasLocalViewport,
+      });
+      return;
+    }
     sendWs({
       type: 'register',
+      wrapperId,
+      resumeKey,
       adapterId,
       cwd: process.cwd(),
       name: sessionName,
-      cols,
-      rows,
+      ...viewport,
       command: opts.command,
       args: opts.args,
       hasLocalViewport,
     });
-  });
+  };
 
-  ws.on('error', (err: Error) => {
-    if (!connected) {
-      process.stderr.write(
-        `\n[switchboard] cannot reach server at ${wsUrl}: ${err.message}\n[switchboard] is the server running? Try: switchboard\n\n`,
-      );
-      pty.kill();
-      restoreTerminal();
-      process.exit(1);
-    }
-    // After connection: log but don't kill the local session.
-    process.stderr.write(`\n[switchboard] WS error: ${err.message}\n`);
-  });
+  const scheduleReconnect = (): void => {
+    if (exited || reconnectTimer) return;
+    const delayMs = Math.min(1000 * 2 ** reconnectAttempts, 10_000);
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      connect();
+    }, delayMs);
+    if (typeof reconnectTimer.unref === 'function') reconnectTimer.unref();
+  };
 
-  ws.on('message', (raw: Buffer) => {
-    let msg: WrapServerMessage;
-    try {
-      msg = JSON.parse(raw.toString('utf8')) as WrapServerMessage;
-    } catch {
-      return;
-    }
-    switch (msg.type) {
-      case 'registered':
-        // Silent — printing here would interleave with claude's TUI.
-        // The session appears in the phone client's list automatically.
+  const connect = (): void => {
+    if (exited) return;
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
+    transportReady = false;
+
+    socket.on('open', () => {
+      if (ws !== socket || exited) return;
+      sendHandshake();
+    });
+
+    socket.on('error', (err: Error) => {
+      if (ws !== socket || exited) return;
+      process.stderr.write(`\n[switchboard] connection error: ${err.message}; retrying\n`);
+    });
+
+    socket.on('close', () => {
+      if (ws !== socket || exited) return;
+      ws = undefined;
+      transportReady = false;
+      scheduleReconnect();
+    });
+
+    socket.on('message', (raw: Buffer) => {
+      if (ws !== socket || exited) return;
+      let msg: WrapServerMessage;
+      try {
+        msg = JSON.parse(raw.toString('utf8')) as WrapServerMessage;
+      } catch {
         return;
-      case 'input':
-        pty.write(msg.data);
-        return;
-      case 'kill':
-        try {
-          pty.kill(msg.signal);
-        } catch {
-          // ignore
-        }
-        return;
-      case 'resize':
-        markPendingResize(msg.cols, msg.rows);
-        try {
-          pty.resize(msg.cols, msg.rows);
-        } catch {
-          // ignore
-        }
-        if (hasLocalViewport) {
+      }
+      switch (msg.type) {
+        case 'registered':
+        case 'resumed':
+          sessionId = msg.sessionId;
+          transportReady = true;
+          reconnectAttempts = 0;
+          flushPendingPty();
+          return;
+        case 'resume-rejected':
+          sessionId = undefined;
+          transportReady = false;
+          sendHandshake();
+          return;
+        case 'input':
+          pty.write(msg.data);
+          return;
+        case 'kill':
           try {
-            process.stdout.write(`\x1b[8;${msg.rows};${msg.cols}t`);
+            pty.kill(msg.signal);
           } catch {
             // ignore
           }
-        }
-        return;
-      case 'error':
-        process.stderr.write(`\n[switchboard] server error: ${msg.message}\n`);
-        return;
-    }
-  });
+          return;
+        case 'resize':
+          markPendingResize(msg.cols, msg.rows);
+          try {
+            pty.resize(msg.cols, msg.rows);
+          } catch {
+            // ignore
+          }
+          if (hasLocalViewport) {
+            try {
+              process.stdout.write(`\x1b[8;${msg.rows};${msg.cols}t`);
+            } catch {
+              // ignore
+            }
+          }
+          return;
+        case 'error':
+          process.stderr.write(`\n[switchboard] server error: ${msg.message}\n`);
+          if (!transportReady) {
+            try {
+              socket.close();
+            } catch {
+              // ignore
+            }
+          }
+          return;
+      }
+    });
+  };
+
+  connect();
 
   // PTY → user's terminal AND server.
   pty.onData((data) => {
     process.stdout.write(data);
-    sendWs({ type: 'pty', data });
+    if (!transportReady || !sendWs({ type: 'pty', data })) queuePty(data);
   });
 
   pty.onExit(({ exitCode, signal }) => cleanup(exitCode, signal));
@@ -270,7 +383,7 @@ export async function runWrapper(argv: string[]): Promise<void> {
     const newCols = process.stdout.columns || 80;
     const newRows = process.stdout.rows || 24;
     if (consumePendingResize(newCols, newRows)) return;
-    sendWs({ type: 'local-resize', cols: newCols, rows: newRows });
+    if (transportReady) sendWs({ type: 'local-resize', cols: newCols, rows: newRows });
   });
 
   // Defensive: if the user's terminal kills us with a signal, still send exit.

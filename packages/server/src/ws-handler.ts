@@ -15,14 +15,25 @@ const KEEPALIVE_MS = 5000;
 export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void {
   let session: Session | undefined;
   let handle: ClientHandle | undefined;
+  let unsubscribeFromSessionList: (() => void) | undefined;
 
   const send = (msg: ServerMessage): void => {
     if (socket.readyState !== socket.OPEN) return;
-    socket.send(JSON.stringify(msg));
+    try {
+      socket.send(JSON.stringify(msg));
+    } catch {
+      // The socket can close between the readyState check and send().
+      // Connection cleanup is handled by the close/error listeners.
+    }
   };
 
   const keepalive = setInterval(() => send({ type: 'ping' }), KEEPALIVE_MS);
   if (typeof keepalive.unref === 'function') keepalive.unref();
+
+  const stopSessionList = (): void => {
+    unsubscribeFromSessionList?.();
+    unsubscribeFromSessionList = undefined;
+  };
 
   const attachTo = (s: Session, initialSize?: { cols: number; rows: number }): void => {
     session = s;
@@ -47,6 +58,9 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     );
   };
 
+  unsubscribeFromSessionList = sessions.subscribe(() => {
+    send({ type: 'sessions', list: sessions.list() });
+  });
   send({ type: 'sessions', list: sessions.list() });
 
   socket.on('message', (raw: Buffer) => {
@@ -65,6 +79,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           return;
         }
         case 'create': {
+          stopSessionList();
           if (session) {
             send({ type: 'error', message: 'already attached to a session' });
             return;
@@ -82,6 +97,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           return;
         }
         case 'attach': {
+          stopSessionList();
           if (session) {
             send({ type: 'error', message: 'already attached to a session' });
             return;
@@ -150,6 +166,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
 
   const cleanupConnection = (reasonPrefix: string, detail?: string) => {
     clearInterval(keepalive);
+    stopSessionList();
     if (process.env.SWITCHBOARD_DEBUG) {
       // eslint-disable-next-line no-console
       console.log(

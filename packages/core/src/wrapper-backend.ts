@@ -24,8 +24,32 @@ export class WrapperBackend implements SessionBackend {
   private disposed = false;
   private _ownSize: { cols: number; rows: number } | undefined;
   private _ownSizeListener: (() => void) | undefined;
+  private out: WrapperBackendOutgoing | undefined;
+  private binding: symbol | undefined;
 
-  constructor(private readonly out: WrapperBackendOutgoing) {}
+  constructor(out?: WrapperBackendOutgoing) {
+    if (out) this.bind(out);
+  }
+
+  /**
+   * Attach a live wrapper transport. The returned unbind callback is scoped to
+   * this exact binding, so a stale socket close cannot detach a newer socket.
+   */
+  bind(out: WrapperBackendOutgoing): () => void {
+    if (this.disposed) return () => {};
+    const binding = Symbol('wrapper-transport');
+    this.out = out;
+    this.binding = binding;
+    return () => {
+      if (this.binding !== binding) return;
+      this.binding = undefined;
+      this.out = undefined;
+    };
+  }
+
+  get isBound(): boolean {
+    return !this.disposed && this.out !== undefined;
+  }
 
   // ─── Own-size negotiation (wrapper's local terminal) ─────────────────────
 
@@ -50,17 +74,17 @@ export class WrapperBackend implements SessionBackend {
 
   write(data: string): void {
     if (this.disposed) return;
-    this.out.sendInput(data);
+    this.out?.sendInput(data);
   }
 
   resize(cols: number, rows: number): void {
     if (this.disposed) return;
-    if (cols > 0 && rows > 0) this.out.sendResize(cols, rows);
+    if (cols > 0 && rows > 0) this.out?.sendResize(cols, rows);
   }
 
   kill(signal?: string): void {
     if (this.disposed) return;
-    this.out.sendKill(signal);
+    this.out?.sendKill(signal);
   }
 
   onData(handler: (chunk: Buffer) => void): void {
@@ -73,6 +97,8 @@ export class WrapperBackend implements SessionBackend {
 
   dispose(): void {
     this.disposed = true;
+    this.binding = undefined;
+    this.out = undefined;
     this.dataHandlers.clear();
     this.exitHandlers.clear();
   }

@@ -24,12 +24,36 @@ export interface RegisterOpts {
   enableParser?: boolean;
 }
 
+export interface SessionManagerOpts {
+  activityBroadcastIntervalMs?: number;
+}
+
+export type SessionManagerEvent =
+  | { type: 'created'; sessionId: string }
+  | { type: 'updated'; sessionId: string; reason: 'activity' | 'state' }
+  | { type: 'exited'; sessionId: string }
+  | { type: 'removed'; sessionId: string };
+
+export type SessionManagerListener = (event: SessionManagerEvent) => void;
+
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
+const DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS = 1000;
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly adapters = new Map<string, AgentAdapter>();
+  private readonly listeners = new Set<SessionManagerListener>();
+  private readonly activityTimers = new Map<string, NodeJS.Timeout>();
+  private readonly lastActivityBroadcastAt = new Map<string, number>();
+  private readonly activityBroadcastIntervalMs: number;
+
+  constructor(opts: SessionManagerOpts = {}) {
+    const interval = opts.activityBroadcastIntervalMs ?? DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS;
+    this.activityBroadcastIntervalMs = Number.isFinite(interval)
+      ? Math.max(0, interval)
+      : DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS;
+  }
 
   registerAdapter(adapter: AgentAdapter): void {
     const id = adapter.manifest.id;
@@ -101,6 +125,11 @@ export class SessionManager {
       .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
   }
 
+  subscribe(listener: SessionManagerListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   async killAll(): Promise<void> {
     for (const s of this.sessions.values()) {
       try {
@@ -111,6 +140,28 @@ export class SessionManager {
       s.dispose();
     }
     this.sessions.clear();
+    this.clearActivityTimers();
+    this.listeners.clear();
+  }
+
+  /**
+   * Release server-owned resources during shutdown. Wrapped PTYs belong to
+   * their wrapper process and must survive a Switchboard server restart.
+   */
+  async shutdown(): Promise<void> {
+    for (const session of this.sessions.values()) {
+      if (session.source === 'spawned') {
+        try {
+          session.kill();
+        } catch {
+          // process may already be dead
+        }
+      }
+      session.dispose();
+    }
+    this.sessions.clear();
+    this.clearActivityTimers();
+    this.listeners.clear();
   }
 
   private requireAdapter(id: string): AgentAdapter {
@@ -124,16 +175,61 @@ export class SessionManager {
     // Cleanup-only listener: no initialSize means it does NOT participate in
     // PTY-size negotiation (see Session.attach docs).
     session.attach({
+      onData: () => this.scheduleActivityUpdate(session.id),
+      onState: () => this.emit({ type: 'updated', sessionId: session.id, reason: 'state' }),
       onExit: () => {
         // For v1, sessions are removed on exit. Persistent sessions are
         // deferred (SPEC §9 Q3).
         const s = this.sessions.get(session.id);
         if (s) {
+          this.cancelActivityUpdate(session.id);
+          this.emit({ type: 'exited', sessionId: session.id });
           s.dispose();
           this.sessions.delete(session.id);
+          this.emit({ type: 'removed', sessionId: session.id });
         }
       },
     });
+    this.lastActivityBroadcastAt.set(session.id, Date.now());
+    this.emit({ type: 'created', sessionId: session.id });
     return session;
+  }
+
+  private scheduleActivityUpdate(sessionId: string): void {
+    if (this.activityTimers.has(sessionId)) return;
+
+    const last = this.lastActivityBroadcastAt.get(sessionId) ?? 0;
+    const remaining = Math.max(0, this.activityBroadcastIntervalMs - (Date.now() - last));
+    const timer = setTimeout(() => {
+      this.activityTimers.delete(sessionId);
+      if (!this.sessions.has(sessionId)) return;
+      this.lastActivityBroadcastAt.set(sessionId, Date.now());
+      this.emit({ type: 'updated', sessionId, reason: 'activity' });
+    }, remaining);
+    if (typeof timer.unref === 'function') timer.unref();
+    this.activityTimers.set(sessionId, timer);
+  }
+
+  private cancelActivityUpdate(sessionId: string): void {
+    const timer = this.activityTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
+    this.activityTimers.delete(sessionId);
+    this.lastActivityBroadcastAt.delete(sessionId);
+  }
+
+  private clearActivityTimers(): void {
+    for (const timer of this.activityTimers.values()) clearTimeout(timer);
+    this.activityTimers.clear();
+    this.lastActivityBroadcastAt.clear();
+  }
+
+  private emit(event: SessionManagerEvent): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // One subscriber must not break Session lifecycle cleanup.
+      }
+    }
   }
 }

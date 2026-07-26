@@ -99,7 +99,8 @@ export class Session implements SessionHandle {
     this.backend.onData((chunk) => {
       this.buffer.write(chunk);
       this._lastActivityAt = new Date();
-      for (const c of this.clients.values()) c.listener.onData?.(chunk);
+      const clients = [...this.clients.values()];
+      for (const c of clients) c.listener.onData?.(chunk);
 
       if (this.parser) {
         let events: readonly AgentEvent[] = [];
@@ -109,7 +110,7 @@ export class Session implements SessionHandle {
           events = [];
         }
         for (const ev of events) {
-          for (const c of this.clients.values()) c.listener.onEvent?.(ev);
+          for (const c of clients) c.listener.onEvent?.(ev);
         }
         const next = this.parser.getState();
         if (next !== this._state) this.transitionState(next);
@@ -118,7 +119,7 @@ export class Session implements SessionHandle {
 
     this.backend.onExit((code, signal) => {
       this.transitionState('exited');
-      for (const c of this.clients.values()) c.listener.onExit?.(code, signal);
+      for (const c of [...this.clients.values()]) c.listener.onExit?.(code, signal);
     });
 
     // Backends with their own viewport (e.g. a wrapper's local terminal)
@@ -281,13 +282,13 @@ export class Session implements SessionHandle {
         );
       }
       this.backend.resize(minCols, minRows);
-      for (const c of this.clients.values()) c.listener.onResize?.(minCols, minRows);
+      for (const c of [...this.clients.values()]) c.listener.onResize?.(minCols, minRows);
     }
   }
 
   private transitionState(next: AgentState): void {
     if (next === this._state) return;
     this._state = next;
-    for (const c of this.clients.values()) c.listener.onState?.(next);
+    for (const c of [...this.clients.values()]) c.listener.onState?.(next);
   }
 }

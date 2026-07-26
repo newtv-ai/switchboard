@@ -2,7 +2,7 @@
 
 > **一部手机，管所有 AI 编程 CLI。** 自部署 Web 应用 + 插件化 adapter 系统 + 原生 PTY 中继。本文是设计的唯一源头。
 >
-> **状态**：v1.0.0 · 最近更新：2026-05-29 · Phase 1 ✅ · Phase 2 ✅ · Phase 3 下一步
+> **状态**：v1.2 · 最近更新：2026-07-23 · 核心会话生命周期整改
 > **本文是单一事实来源。** 任何新功能、范围调整、架构决策**都必须在写代码之前/之中**反映到本文。如果实现和本文走偏，要么改本文，要么回滚实现。更新流程见 §11 变更日志。
 >
 > 🌐 **语言**: [English](./SPEC.md) · 中文
@@ -142,13 +142,16 @@
   - 把当前 WebSocket 的输入路由到 PTY stdin
   - 从任何客户端 detach 会话——进程在断开后继续运行
   - 客户端通知窗口大小变化时 resize PTY
+  - 发布会话生命周期变化（`created`、`updated`、`exited`、`removed`），让列表客户端无需轮询也能保持最新
+  - Session 和 SessionManager 派发前快照监听器，回调中的清理或 detach 不会截断同一轮后续客户端通知
+  - wrapper 传输短暂中断时保留原 Session，并允许 `WrapperBackend` 通道解绑后重新绑定
 - **关键 API**：
   ```typescript
   class SessionManager {
-    create(opts: { adapterId: string; cwd: string; env?: Record<string, string> }): Session;
-    attach(sessionId: string, ws: WebSocket): Attachment;
+    spawn(opts: SpawnOpts): Session;
+    register(opts: RegisterOpts): Session;
     list(): SessionSummary[];
-    kill(sessionId: string): Promise<void>;
+    subscribe(listener: (event: SessionManagerEvent) => void): () => void;
   }
   ```
 
@@ -167,7 +170,7 @@
   - `action` `{ actionId, params? }` —— L3 语义动作（adapter 翻译）
   - `kill` `{ sessionId }`
 - **Server → Client**：
-  - `sessions` `{ list: SessionSummary[] }`
+  - `sessions` `{ list: SessionSummary[] }` —— 初始快照，以及连接仍停留在列表模式时的实时生命周期快照；仅活动时间变化的更新按每个 Session 每秒最多一次节流
   - `ready` `{ sessionId, adapter, capabilities, replay }`
   - `pty` `{ data }` —— 原始 ANSI 字节
   - `event` `{ event: AgentEvent }` —— 结构化事件（Phase 3+）
@@ -176,17 +179,26 @@
   - `error` `{ message }`
 
 #### `/wrap` —— Wrapper 进程协议（Mode A）
-- **每次 wrapper 调用一条 WS。** Wrapper 是 PTY 的拥有者；服务端是它和任意 attach 的浏览器之间的中继。
+- **每次 wrapper 调用一条逻辑连接。** Wrapper 是 PTY 的拥有者；本地 PTY 持续运行时，底层 WS 可以断线重连。
 - **Wrapper → Server**：
-  - `register` `{ adapterId, cwd, name?, command, args, cols, rows, env? }` —— 初始握手
+  - `register` `{ wrapperId, resumeKey, adapterId, cwd, name?, command, args, cols, rows, env? }` —— 初始握手；`wrapperId` 与密码学随机的 `resumeKey` 在 wrapper 进程生命周期内保持稳定
+  - `resume` `{ wrapperId, resumeKey, sessionId, cols, rows, hasLocalViewport? }` —— 重连到同一内存 Session
   - `pty` `{ data }` —— 每个 PTY 输出块
   - `exit` `{ code, signal? }`
 - **Server → Wrapper**：
   - `registered` `{ sessionId }` —— 回执，带分配的 id
+  - `resumed` `{ sessionId }` —— 恢复成功，保留原 Session 与 replay buffer
+  - `resume-rejected` `{ reason }` —— Session 已不存在（通常因为 server 重启）；wrapper 在同一 socket 上重新注册
   - `input` `{ data }` —— 从任意 attach 浏览器来的输入
   - `resize` `{ cols, rows }` —— 浏览器发的 resize 请求（wrapper 可以接受或忽略；v1 里本地终端尺寸是权威的）
   - `kill` `{ signal? }`
   - `error` `{ message }`
+
+传输规则：
+- wrapper 重连退避上限为 10 秒；同一 server 进程内，断线 Session 保留 30 秒宽限期。
+- 重新绑定必须具备连接代际保护：旧 socket 的 close 不能解绑新连接；通过 `resumeKey` 校验的新连接可以替代旧传输，但不得创建重复 Session。
+- wrapper 传输断开期间不缓存浏览器输入；wrapper 可以保留有上限的 PTY 输出，并且只在 register/resume 成功后补发。
+- Switchboard server 正常关闭时不得 kill 由 wrapper 拥有的 PTY。server 重启后 resume 被拒，wrapper 自动注册新 Session，本地 CLI 不退出。
 
 对同一段 agent 输出，`pty` 和 `event` 可能同时发——`pty` 总是发；`event` 只在 adapter 有 parser 时发。客户端选择渲染哪一个。
 
@@ -355,7 +367,7 @@ export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" |
 | PWA | vite-plugin-pwa + Workbox | 标准。 |
 | 推送 | Web Push API (VAPID) | Chrome（Android）和 Safari 16.4+（iOS）都支持。 |
 | Linter/formatter | Biome | 一个工具替换 eslint+prettier；更快。 |
-| 测试 | Vitest | 前后端统一；语法和 Jest 一样。 |
+| 测试 | Node.js `node:test` + `tsx --test` | 第一批生命周期测试直接运行 TypeScript 源码，不增加新的测试框架依赖。 |
 | Build（后端） | tsup | esbuild 的零配置封装。 |
 | 分发 | npm（`npm i -g`） | 一行装。后续可以用 `pkg`/Bun 出单文件。 |
 | 配置存储 | `~/.claude-remote-agent/`（Windows: `%APPDATA%\claude-remote-agent\`） | 标准的 XDG-ish。 |
@@ -541,6 +553,7 @@ switchboard/
 5. **版本号**：每次有意义的变更在本文顶部递增版本。v0.x = 预发布，v1.0 = 首次 npm 发布。
 
 ### 近期变更
+- 2026-07-23 — v1.2 — **核心可靠性整改**：列表模式 `/ws` 客户端实时收到 Session 快照，纯活动时间更新按 Session 节流；监听器按快照派发，清理不会吞掉浏览器退出帧；浏览器发送能容忍 socket 关闭竞态。wrapper 传输采用稳定进程标识与恢复凭据、带代际保护的后端重新绑定、30 秒 server 宽限期、有上限的 PTY 输出缓冲、封顶退避和限时退出帧 flush。server 正常关闭时保留 wrapper 拥有的 PTY；server 重启后拒绝旧 resume，wrapper 自动注册新 Session。新增 Node/tsx 生命周期测试，覆盖真实传输连续十次闪断及 server 重启恢复。
 - 2026-06-27 — v1.1 — **多 AI 工作群**（Phase 8、§4.6）：CLI 扫描 + `claude` 适配器；工作群模型（一文件夹一群、去重、Option-B 启动）；项目内 `.switchboard/` 共享上下文 + AGENTS/CLAUDE 注入；任务 + 分派 + peek；四步工作流；手动交接；实时 `/workgroups/ws` 广播；原子 JSON 持久化。`scripts/test-workgroups.ps1` 28/28 通过。有意不做 token 自动切换（无用量数据源）。
 - 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。
 - 2026-05-23 — v0.9 — **Phase 2 闸门通过**：跨手机 + 桌面的多客户端实地测试通过。Wrapper 在 headless 跑（没有本地 TTY）时尊重服务端驱动的 resize，所以后台 wrapper 正确采纳浏览器协商的 PTY 尺寸。快捷操作栏在 ≥ 600px 视口（有物理键盘）下隐藏。

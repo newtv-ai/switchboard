@@ -16,6 +16,9 @@ export {
 } from './session.js';
 export {
   SessionManager,
+  type SessionManagerEvent,
+  type SessionManagerListener,
+  type SessionManagerOpts,
   type SpawnOpts,
   type RegisterOpts,
 } from './session-manager.js';

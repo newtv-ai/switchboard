@@ -2,7 +2,7 @@
 
 > **One phone, every AI coding CLI.** Self-hostable web app + plugin-based adapter system + native PTY relay. This document is the design source of truth.
 >
-> **Status**: v1.0.0 · Last updated: 2026-05-29 · Phase 1 ✅ · Phase 2 ✅ · Phase 3 next
+> **Status**: v1.2 · Last updated: 2026-07-23 · Core session lifecycle remediation
 > **This document is the single source of truth.** Any new feature, scope change, or architectural decision MUST be reflected here before/during implementation. If implementation drifts from this doc, the doc is fixed (or the implementation is rolled back). See §11 Change Log for how to update.
 >
 > 🌐 **Languages**: English · [中文](./SPEC.zh-CN.md)
@@ -142,13 +142,16 @@ The rest of the system (Session, SessionManager, parsers, actions, UI) is identi
   - Route input from active WebSocket(s) to PTY stdin
   - Detach session from any connected client — process keeps running after disconnect
   - Resize PTY when client signals window resize
+  - Publish session lifecycle changes (`created`, `updated`, `exited`, `removed`) so list-only clients stay current without polling
+  - Snapshot Session and SessionManager listeners before dispatch so cleanup or detach during a callback cannot suppress later clients in the same dispatch
+  - Preserve wrapped Sessions during a short transport outage while their `WrapperBackend` channel is unbound/rebound
 - **Key API**:
   ```typescript
   class SessionManager {
-    create(opts: { adapterId: string; cwd: string; env?: Record<string, string> }): Session;
-    attach(sessionId: string, ws: WebSocket): Attachment;
+    spawn(opts: SpawnOpts): Session;
+    register(opts: RegisterOpts): Session;
     list(): SessionSummary[];
-    kill(sessionId: string): Promise<void>;
+    subscribe(listener: (event: SessionManagerEvent) => void): () => void;
   }
   ```
 
@@ -167,7 +170,7 @@ Two WS endpoints, different purposes:
   - `action` `{ actionId, params? }` — L3 semantic action (adapter translates)
   - `kill` `{ sessionId }`
 - **Server → Client**:
-  - `sessions` `{ list: SessionSummary[] }`
+  - `sessions` `{ list: SessionSummary[] }` — initial snapshot plus live lifecycle snapshots while the connection remains list-only; activity-only updates are throttled to at most once per second per Session
   - `ready` `{ sessionId, adapter, capabilities, replay }`
   - `pty` `{ data }` — raw ANSI bytes
   - `event` `{ event: AgentEvent }` — structured event (Phase 3+)
@@ -176,17 +179,26 @@ Two WS endpoints, different purposes:
   - `error` `{ message }`
 
 #### `/wrap` — Wrapper-process protocol (Mode A)
-- **One WS per wrapper invocation.** The wrapper IS the PTY owner; server is a relay between it and any attached browsers.
+- **One logical connection per wrapper invocation.** The wrapper IS the PTY owner; its WS transport may reconnect while the local PTY keeps running.
 - **Wrapper → Server**:
-  - `register` `{ adapterId, cwd, name?, command, args, cols, rows, env? }` — initial handshake
+  - `register` `{ wrapperId, resumeKey, adapterId, cwd, name?, command, args, cols, rows, env? }` — initial handshake; `wrapperId` and the cryptographically random `resumeKey` stay stable for the wrapper process lifetime
+  - `resume` `{ wrapperId, resumeKey, sessionId, cols, rows, hasLocalViewport? }` — reconnect to the same in-memory Session
   - `pty` `{ data }` — every PTY chunk
   - `exit` `{ code, signal? }`
 - **Server → Wrapper**:
   - `registered` `{ sessionId }` — ack with assigned id
+  - `resumed` `{ sessionId }` — resume accepted; the existing Session and replay buffer are retained
+  - `resume-rejected` `{ reason }` — Session is no longer present (normally after server restart); wrapper registers again on the same socket
   - `input` `{ data }` — input from any attached browser
   - `resize` `{ cols, rows }` — resize request from browser (wrapper may honour or ignore; the local terminal is authoritative for size in v1)
   - `kill` `{ signal? }`
   - `error` `{ message }`
+
+Transport rules:
+- Wrapper reconnect backoff is capped at 10 seconds. A disconnected Session is retained for a 30-second grace period in the same server process.
+- Rebinding is generation-safe: a stale socket close cannot unbind a newer connection, and a newer authenticated connection supersedes the old transport without creating a duplicate Session.
+- Browser input is not queued while the wrapper transport is disconnected. The wrapper may retain a bounded amount of PTY output and flush it only after registration/resume succeeds.
+- A graceful Switchboard server shutdown never kills a wrapped PTY owned by the wrapper process. After restart, resume is rejected and the wrapper automatically registers a new Session while the local CLI continues running.
 
 Both `pty` and `event` may be sent for the same agent output — `pty` is always sent; `event` is sent only if the adapter has a parser. Clients choose which to render.
 
@@ -358,7 +370,7 @@ id. Added 2026-06-27 (see §8 Phase 8, §11).
 | PWA | vite-plugin-pwa + Workbox | Standard. |
 | Push | Web Push API (VAPID) | Works in Chrome (Android) and Safari 16.4+ (iOS). |
 | Linter/formatter | Biome | Single tool replaces eslint+prettier; faster. |
-| Tests | Vitest | Unifies frontend+backend; same syntax as Jest. |
+| Tests | Node.js `node:test` via `tsx --test` | Keeps the first lifecycle suite dependency-free while running TypeScript sources directly. |
 | Build (backend) | tsup | Zero-config esbuild wrapper. |
 | Distribution | npm (`npm i -g`) | One-line install. Single-binary via `pkg`/Bun later as nice-to-have. |
 | Config storage | `~/.claude-remote-agent/` (Windows: `%APPDATA%\claude-remote-agent\`) | Standard XDG-ish. |
@@ -547,6 +559,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
+- 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Added Node/tsx lifecycle tests, including ten consecutive real transport drops and server-restart recovery.
 - 2026-06-27 — v1.1 — **Multi-AI Workgroups** (Phase 8, §4.6): CLI scan + `claude` adapter; workgroup model (one-per-folder, dedupe, Option-B spawn); project-local `.switchboard/` shared context with AGENTS/CLAUDE injection; tasks + dispatch + peek; four-step workflow; manual handoff; live `/workgroups/ws` broadcast; atomic JSON persistence. `scripts/test-workgroups.ps1` 28/28 green. Token auto-switch intentionally not built (no usage-data source).
 - 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector, distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
 - 2026-05-23 — v0.9 — **Phase 2 gate PASSED**: live multi-client test confirmed across phone + desktop. Wrapper now honors server-driven resize when running headless (no local TTY), so background wrappers correctly adopt browser-negotiated PTY size. Quick-actions toolbar hidden on viewports ≥ 600px (physical keyboards present).

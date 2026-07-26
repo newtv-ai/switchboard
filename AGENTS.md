@@ -26,10 +26,9 @@ SPEC diverge, fix one — never let them drift silently.
 - `npm run dev`       — start server + web in dev mode (concurrently)
 - `npm run build`     — build all workspaces
 - `npm run typecheck` — TypeScript typecheck across workspaces
+- `npm test`          — run TypeScript tests with Node's built-in test runner via `tsx`
 - `npm run lint`      — Biome check (lint + format)
 - `npm run lint:fix`  — Biome safe auto-fix
-
-> No test runner is configured yet. When adding one, document it here and in SPEC.
 
 ## Conventions
 - **Linter/formatter: Biome.** Run `npm run lint` before committing; `lint:fix` for safe fixes.

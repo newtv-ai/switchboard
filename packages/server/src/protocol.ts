@@ -57,6 +57,10 @@ export type ServerMessage =
 export type WrapClientMessage =
   | {
       type: 'register';
+      /** Optional only for one-connection compatibility with pre-v1.2 wrappers. */
+      wrapperId?: string;
+      /** Optional only for one-connection compatibility with pre-v1.2 wrappers. */
+      resumeKey?: string;
       adapterId: string;
       cwd: string;
       name?: string;
@@ -73,6 +77,15 @@ export type WrapClientMessage =
        */
       hasLocalViewport?: boolean;
     }
+  | {
+      type: 'resume';
+      wrapperId: string;
+      resumeKey: string;
+      sessionId: string;
+      cols: number;
+      rows: number;
+      hasLocalViewport?: boolean;
+    }
   | { type: 'pty'; data: string }
   | { type: 'local-resize'; cols: number; rows: number }
   | { type: 'exit'; code: number; signal?: number };
@@ -80,6 +93,8 @@ export type WrapClientMessage =
 /** Messages the server sends on /wrap. */
 export type WrapServerMessage =
   | { type: 'registered'; sessionId: string }
+  | { type: 'resumed'; sessionId: string }
+  | { type: 'resume-rejected'; reason: string }
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'kill'; signal?: string }

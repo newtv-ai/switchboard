@@ -22,7 +22,7 @@ import { WorkflowManager } from './workflow-manager.js';
 import { WorkgroupManager } from './workgroup-manager.js';
 import { WorkgroupStore } from './workgroup-store.js';
 import { bindWorkgroupWs } from './workgroup-ws.js';
-import { bindWrap } from './wrap-handler.js';
+import { WrapperRegistry, bindWrap } from './wrap-handler.js';
 import { bindWebSocket } from './ws-handler.js';
 
 export interface StartServerOpts {
@@ -44,6 +44,7 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   const port = opts.port ?? 8787;
 
   const sessions = new SessionManager();
+  const wrappers = new WrapperRegistry(sessions);
   sessions.registerAdapter(passthroughAdapter);
   sessions.registerAdapter(claudeAdapter);
   sessions.registerAdapter(codexAdapter);
@@ -370,7 +371,7 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
       }
       return;
     }
-    bindWrap(socket, sessions);
+    bindWrap(socket, wrappers);
   });
 
   await app.listen({ host, port });
@@ -378,7 +379,8 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   const url = `http://${host}:${port}`;
 
   const close = async (): Promise<void> => {
-    await sessions.killAll();
+    wrappers.dispose();
+    await sessions.shutdown();
     await app.close();
   };
 
