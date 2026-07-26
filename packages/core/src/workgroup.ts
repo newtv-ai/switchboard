@@ -9,10 +9,22 @@ export type MemberRole = 'active' | 'observer' | 'idle';
 export interface AgentMember {
   /** The underlying Session id (see SessionManager). */
   sessionId: string;
+  /** The adapter actually backing the Session — 'passthrough' for raw CLIs. */
   adapterId: string;
+  /**
+   * Set only for adapter-less members: the command that was started. Kept
+   * separate from adapterId so the two never get confused (the audit's F-03).
+   * Absent on members written before this field existed.
+   */
+  command?: string;
   role: MemberRole;
   /** ISO timestamp. */
   joinedAt: string;
+}
+
+/** What to show for a member: the real CLI name, else its adapter id. */
+export function memberLabel(member: Pick<AgentMember, 'adapterId' | 'command'>): string {
+  return member.command ?? member.adapterId;
 }
 
 export interface Workgroup {

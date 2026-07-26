@@ -3,7 +3,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { Session, SessionManager, SpawnRawOpts, Workgroup } from '@switchboard/core';
+import {
+  type Session,
+  type SessionManager,
+  type SpawnRawOpts,
+  type Workgroup,
+  memberLabel,
+} from '@switchboard/core';
 import { WorkgroupManager } from './workgroup-manager.js';
 import type { WorkgroupStore } from './workgroup-store.js';
 
@@ -17,7 +23,10 @@ test('adapter-less workgroup members use raw passthrough spawning', async () => 
     },
     spawnRaw: (opts: SpawnRawOpts) => {
       rawOpts = opts;
-      return { id: 'raw-session' } as Session;
+      return {
+        id: 'raw-session',
+        adapter: { manifest: { id: 'passthrough' } },
+      } as unknown as Session;
     },
   } as unknown as SessionManager;
   const store = {
@@ -31,6 +40,9 @@ test('adapter-less workgroup members use raw passthrough spawning', async () => 
 
   assert.equal(rawOpts?.command, 'gemini');
   assert.equal(rawOpts?.cwd, cwd);
-  assert.equal(member.adapterId, 'gemini');
+  // adapterId always names a real adapter; the CLI lives in `command`.
+  assert.equal(member.adapterId, 'passthrough');
+  assert.equal(member.command, 'gemini');
+  assert.equal(memberLabel(member), 'gemini');
   assert.equal(member.sessionId, 'raw-session');
 });

@@ -70,7 +70,7 @@ $m1 = ApiPost "/api/workgroups/$($wgA.id)/members" @{ adapterId = 'passthrough' 
 Check "addMember: spawned, role=active" ($m1.role -eq 'active')
 Check "addMember: session in /sessions" ((ApiGet '/sessions' | Where-Object { $_.id -eq $m1.sessionId }).Count -eq 1)
 $mRaw = ApiPost "/api/workgroups/$($wgA.id)/members" @{ command = 'node' }
-Check "addMember raw: adapter-less command starts" (($mRaw.adapterId -eq 'node') -and ($mRaw.role -eq 'active'))
+Check "addMember raw: adapter-less command starts" (($mRaw.command -eq 'node') -and ($mRaw.adapterId -eq 'passthrough') -and ($mRaw.role -eq 'active'))
 Check "addMember raw: session uses passthrough PTY" ((ApiGet '/sessions' | Where-Object { $_.id -eq $mRaw.sessionId }).adapterId -eq 'passthrough')
 ApiPost "/api/workgroups/$($wgA.id)/members/$($m1.sessionId)/role" @{ role = 'idle' } | Out-Null
 $fullA = ApiGet "/api/workgroups/$($wgA.id)"

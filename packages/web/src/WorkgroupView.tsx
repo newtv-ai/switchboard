@@ -13,6 +13,7 @@ import {
   getWorkgroup,
   handoff,
   listTasks,
+  memberName,
   peekSession,
   removeMember,
   scanClis,
@@ -191,8 +192,10 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
   }
 
   const available = scan.filter((s) => s.status === 'available');
-  const memberLabel = (sessionId: string): string =>
-    wg.members.find((m) => m.sessionId === sessionId)?.adapterId ?? sessionId.slice(0, 8);
+  const memberLabel = (sessionId: string): string => {
+    const member = wg.members.find((m) => m.sessionId === sessionId);
+    return member ? memberName(member) : sessionId.slice(0, 8);
+  };
 
   return (
     <div className="list-view">
@@ -272,7 +275,7 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
               <li key={m.sessionId}>
                 <div className="session-card">
                   <div className="session-card-row">
-                    <span className="session-name">{m.adapterId}</span>
+                    <span className="session-name">{memberName(m)}</span>
                     <button
                       type="button"
                       className={`session-state state-${m.role}`}
@@ -359,7 +362,7 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
                   .filter((m) => m.sessionId !== handoffFrom)
                   .map((m) => (
                     <option key={m.sessionId} value={m.sessionId}>
-                      {m.adapterId}
+                      {memberName(m)}
                     </option>
                   ))}
               </select>
@@ -459,7 +462,7 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
                       <option value="">(pick member)</option>
                       {wg.members.map((m) => (
                         <option key={m.sessionId} value={m.sessionId}>
-                          {m.adapterId}
+                          {memberName(m)}
                         </option>
                       ))}
                     </select>

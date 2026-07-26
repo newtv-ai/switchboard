@@ -5,9 +5,17 @@ export type MemberRole = 'active' | 'observer' | 'idle';
 
 export interface AgentMember {
   sessionId: string;
+  /** The adapter backing the Session — 'passthrough' for adapter-less CLIs. */
   adapterId: string;
+  /** Set only for adapter-less members: the command that was started. */
+  command?: string;
   role: MemberRole;
   joinedAt: string;
+}
+
+/** Show the real CLI name for raw members, the adapter id for the rest. */
+export function memberName(member: AgentMember): string {
+  return member.command ?? member.adapterId;
 }
 
 export interface Workgroup {

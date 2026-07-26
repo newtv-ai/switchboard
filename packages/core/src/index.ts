@@ -28,5 +28,6 @@ export {
   type MemberRole,
   type Workgroup,
   type WorkgroupSummary,
+  memberLabel,
   summarizeWorkgroup,
 } from './workgroup.js';

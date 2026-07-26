@@ -7,6 +7,7 @@ import {
   type SessionManager,
   type Workgroup,
   type WorkgroupSummary,
+  memberLabel,
   summarizeWorkgroup,
 } from '@switchboard/core';
 import {
@@ -116,18 +117,21 @@ export class WorkgroupManager {
     if ((!adapterId && !command) || (adapterId && command)) {
       throw new Error('Provide exactly one of adapterId or command');
     }
-    const agentId = adapterId ?? command;
-    if (!agentId) throw new Error('Adapter or command is required');
+    const label = adapterId ?? command;
+    if (!label) throw new Error('Adapter or command is required');
     const session = adapterId
-      ? this.sessions.spawn({ adapterId, cwd: wg.cwd, name: `${agentId}@${wg.name}` })
+      ? this.sessions.spawn({ adapterId, cwd: wg.cwd, name: `${label}@${wg.name}` })
       : this.sessions.spawnRaw({
-          command: agentId,
+          command: label,
           cwd: wg.cwd,
-          name: `${agentId}@${wg.name}`,
+          name: `${label}@${wg.name}`,
         });
     const member: AgentMember = {
       sessionId: session.id,
-      adapterId: agentId,
+      // Raw members run on the passthrough adapter; the command they actually
+      // started lives in its own field so `adapterId` always names an adapter.
+      adapterId: session.adapter.manifest.id,
+      ...(command ? { command } : {}),
       role: 'active',
       joinedAt: new Date().toISOString(),
     };
@@ -136,7 +140,7 @@ export class WorkgroupManager {
     await appendTimeline(wg.contextDir, {
       ts: member.joinedAt,
       type: 'member.joined',
-      adapterId: agentId,
+      adapterId: memberLabel(member),
       sessionId: session.id,
     });
     return member;
@@ -197,13 +201,13 @@ export class WorkgroupManager {
     const body = note?.trim() ? note.trim() : '_(no note provided)_';
     await appendHandoff(
       wg.contextDir,
-      `\n## ${ts} — ${from.adapterId} → ${to.adapterId}\n\n${body}\n`,
+      `\n## ${ts} — ${memberLabel(from)} → ${memberLabel(to)}\n\n${body}\n`,
     );
     from.role = 'idle';
     to.role = 'active';
     await this.store.save(wg);
     toSession.write(
-      `Taking over from ${from.adapterId}. Read .switchboard/handoff.md and .switchboard/context.md, then continue.\r`,
+      `Taking over from ${memberLabel(from)}. Read .switchboard/handoff.md and .switchboard/context.md, then continue.\r`,
     );
     await appendTimeline(wg.contextDir, {
       ts,
