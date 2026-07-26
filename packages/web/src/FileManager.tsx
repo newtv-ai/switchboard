@@ -17,7 +17,29 @@ interface UploadState {
   speedMBps: number;
 }
 
+// Chunk size is declared to the server on create, so this is the client's
+// choice within the server's limit — not a constant both sides must share.
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+
+/**
+ * Upload errors come back as `{ error, code }`. Surfacing the raw JSON in an
+ * alert() is unreadable, and `code` is what tells us whether the user can
+ * retry (e.g. overwrite an existing file).
+ */
+async function readError(res: Response): Promise<{ error: string; code: string }> {
+  const fallback = `HTTP ${res.status}`;
+  try {
+    const text = await res.text();
+    if (!text) return { error: fallback, code: 'unknown' };
+    const body = JSON.parse(text) as { error?: unknown; code?: unknown };
+    return {
+      error: typeof body.error === 'string' ? body.error : text,
+      code: typeof body.code === 'string' ? body.code : 'unknown',
+    };
+  } catch {
+    return { error: fallback, code: 'unknown' };
+  }
+}
 
 export function FileManager({ onClose }: FileManagerProps): JSX.Element {
   const [files, setFiles] = useState<ServerFile[]>([]);
@@ -59,17 +81,37 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
       }));
 
       try {
-        const createRes = await fetch('/api/uploads', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            filename: file.name,
-            totalSize: file.size,
-            totalChunks,
-          }),
-        });
+        const createUpload = (overwrite: boolean): Promise<Response> =>
+          fetch('/api/uploads', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              filename: file.name,
+              totalSize: file.size,
+              totalChunks,
+              chunkSize: CHUNK_SIZE,
+              ...(overwrite ? { overwrite: true } : {}),
+            }),
+          });
+
+        let createRes = await createUpload(false);
+        if (createRes.status === 409) {
+          const conflict = await readError(createRes);
+          // Only a completed same-name file can be replaced. A concurrent
+          // upload of the same name is a different problem — never clobber it.
+          if (
+            conflict.code === 'file-exists' &&
+            confirm(
+              `"${file.name}" 已存在于 downloads/。\n\n确定要覆盖它吗？\n\nOverwrite the existing file?`,
+            )
+          ) {
+            createRes = await createUpload(true);
+          } else {
+            throw new Error(conflict.error);
+          }
+        }
         if (!createRes.ok) {
-          throw new Error(`HTTP ${createRes.status}: ${await createRes.text()}`);
+          throw new Error((await readError(createRes)).error);
         }
         uploadId = ((await createRes.json()) as { uploadId: string }).uploadId;
 
@@ -87,13 +129,7 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
           });
 
           if (!res.ok) {
-            let errorDetail = '';
-            try {
-              errorDetail = await res.text();
-            } catch (_e) {
-              /* ignore */
-            }
-            throw new Error(`HTTP ${res.status}: ${errorDetail}`);
+            throw new Error((await readError(res)).error);
           }
 
           uploadedBytes += chunk.size;
@@ -119,7 +155,7 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
           completeRes = await fetch(`/api/uploads/${uploadId}/complete`, { method: 'POST' });
         }
         if (!completeRes.ok) {
-          throw new Error(`HTTP ${completeRes.status}: ${await completeRes.text()}`);
+          throw new Error((await readError(completeRes)).error);
         }
         setUploadProgress((prev) => ({
           ...prev,

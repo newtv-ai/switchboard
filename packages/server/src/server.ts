@@ -39,11 +39,14 @@ export interface StartedServer {
 const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 function sendUploadError(reply: FastifyReply, err: unknown) {
-  const code = (err as NodeJS.ErrnoException).code;
-  const statusCode =
-    err instanceof UploadError ? err.statusCode : code === 'FST_REQ_FILE_TOO_LARGE' ? 413 : 500;
+  const errno = (err as NodeJS.ErrnoException).code;
+  const tooLarge = errno === 'FST_REQ_FILE_TOO_LARGE';
+  const statusCode = err instanceof UploadError ? err.statusCode : tooLarge ? 413 : 500;
   const message = err instanceof Error ? err.message : 'Internal Server Error';
-  return reply.code(statusCode).send({ error: message });
+  // `code` is what the client branches on (e.g. offering to overwrite);
+  // `error` stays human-readable for logs and alerts.
+  const code = err instanceof UploadError ? err.code : tooLarge ? 'too-large' : 'internal';
+  return reply.code(statusCode).send({ error: message, code });
 }
 
 export async function startServer(opts: StartServerOpts = {}): Promise<StartedServer> {
@@ -100,12 +103,16 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
       filename?: string;
       totalSize?: number;
       totalChunks?: number;
+      chunkSize?: number;
+      overwrite?: boolean;
     };
     try {
       const created = await uploads.create({
         filename: typeof body.filename === 'string' ? body.filename : '',
         totalSize: body.totalSize as number,
         totalChunks: body.totalChunks as number,
+        ...(body.chunkSize === undefined ? {} : { chunkSize: body.chunkSize }),
+        overwrite: body.overwrite === true,
       });
       return reply.code(201).send(created);
     } catch (err) {
@@ -124,7 +131,9 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       if (data.file.truncated) {
-        return reply.code(413).send({ error: `Chunk exceeds ${MAX_UPLOAD_CHUNK_SIZE} bytes` });
+        return reply
+          .code(413)
+          .send({ error: `Chunk exceeds ${MAX_UPLOAD_CHUNK_SIZE} bytes`, code: 'too-large' });
       }
       const index = Number(rawIndex);
       const result = await uploads.writeChunk(uploadId, index, Buffer.concat(chunks));

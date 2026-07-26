@@ -57,6 +57,76 @@ test('retries identical chunks but rejects conflicting data and filenames', asyn
   );
 });
 
+test('an existing file is only replaced when the client asks for it', async () => {
+  const { manager, downloads } = await fixture();
+  const first = await manager.create({ filename: 'dup.txt', totalSize: 5, totalChunks: 1 });
+  await manager.writeChunk(first.uploadId, 0, Buffer.from('older'));
+  await manager.complete(first.uploadId);
+
+  const refused = await manager
+    .create({ filename: 'dup.txt', totalSize: 5, totalChunks: 1 })
+    .then(() => undefined)
+    .catch((err: { statusCode: number; code: string }) => err);
+  assert.equal(refused?.statusCode, 409);
+  // The UI branches on this code to offer "overwrite?" — prose must not be
+  // the contract.
+  assert.equal(refused?.code, 'file-exists');
+  assert.equal(await readFile(join(downloads, 'dup.txt'), 'utf8'), 'older');
+
+  const second = await manager.create({
+    filename: 'dup.txt',
+    totalSize: 5,
+    totalChunks: 1,
+    overwrite: true,
+  });
+  await manager.writeChunk(second.uploadId, 0, Buffer.from('newer'));
+  await manager.complete(second.uploadId);
+  assert.equal(await readFile(join(downloads, 'dup.txt'), 'utf8'), 'newer');
+  assert.deepEqual(await readdir(downloads), ['dup.txt']);
+});
+
+test('the client picks its own chunk size within the server limit', async () => {
+  const { manager, downloads } = await fixture();
+  // maxChunkSize is 5 in this fixture; a client using 2-byte chunks is fine.
+  const { uploadId } = await manager.create({
+    filename: 'small-chunks.txt',
+    totalSize: 5,
+    totalChunks: 3,
+    chunkSize: 2,
+  });
+  await manager.writeChunk(uploadId, 0, Buffer.from('ab'));
+  await manager.writeChunk(uploadId, 1, Buffer.from('cd'));
+  await assert.rejects(
+    () => manager.writeChunk(uploadId, 2, Buffer.from('ef')),
+    /expected 1/,
+    'the tail chunk is sized from the declared chunkSize',
+  );
+  await manager.writeChunk(uploadId, 2, Buffer.from('e'));
+  await manager.complete(uploadId);
+  assert.equal(await readFile(join(downloads, 'small-chunks.txt'), 'utf8'), 'abcde');
+
+  await assert.rejects(
+    () =>
+      manager.create({
+        filename: 'too-big-chunks.txt',
+        totalSize: 12,
+        totalChunks: 2,
+        chunkSize: 6,
+      }),
+    /chunkSize must be a positive integer no greater than 5/,
+  );
+  await assert.rejects(
+    () =>
+      manager.create({
+        filename: 'wrong-count.txt',
+        totalSize: 5,
+        totalChunks: 2,
+        chunkSize: 2,
+      }),
+    /totalChunks must be 3 for 2 byte chunks/,
+  );
+});
+
 test('reserves a filename before concurrent create calls can pass the disk check', async () => {
   const { manager } = await fixture();
   const attempts = await Promise.allSettled([

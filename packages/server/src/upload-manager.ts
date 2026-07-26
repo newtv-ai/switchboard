@@ -6,6 +6,7 @@ import {
   open,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   unlink,
@@ -19,10 +20,24 @@ const STALE_UPLOAD_AGE_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const COMPLETED_UPLOAD_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Machine-readable reasons the client can act on. `file-exists` is the one the
+ * UI turns into an "overwrite?" prompt, so it must not be inferred from prose.
+ */
+export type UploadErrorCode =
+  | 'invalid-request'
+  | 'file-exists'
+  | 'upload-in-progress'
+  | 'file-in-use'
+  | 'too-large'
+  | 'not-found'
+  | 'conflict';
+
 export class UploadError extends Error {
   constructor(
     message: string,
     readonly statusCode: number,
+    readonly code: UploadErrorCode = 'conflict',
   ) {
     super(message);
     this.name = 'UploadError';
@@ -35,6 +50,8 @@ interface UploadSession {
   filenameKey: string;
   totalSize: number;
   totalChunks: number;
+  chunkSize: number;
+  overwrite: boolean;
   dir: string;
   uploaded: Map<number, number>;
   completing: boolean;
@@ -44,6 +61,10 @@ export interface CreateUploadOpts {
   filename: string;
   totalSize: number;
   totalChunks: number;
+  /** Client's chunk size; defaults to the server maximum. */
+  chunkSize?: number;
+  /** Replace an existing file of the same name instead of failing with 409. */
+  overwrite?: boolean;
 }
 
 export interface UploadManagerOpts {
@@ -84,38 +105,59 @@ export class UploadManager {
   async create(opts: CreateUploadOpts): Promise<{ uploadId: string; filename: string }> {
     const filename = this.safeFilename(opts.filename);
     if (!Number.isSafeInteger(opts.totalSize) || opts.totalSize < 0) {
-      throw new UploadError('totalSize must be a non-negative integer', 400);
+      throw new UploadError('totalSize must be a non-negative integer', 400, 'invalid-request');
     }
     if (opts.totalSize > this.maxUploadSize) {
-      throw new UploadError(`File exceeds the ${this.maxUploadSize} byte limit`, 413);
+      throw new UploadError(`File exceeds the ${this.maxUploadSize} byte limit`, 413, 'too-large');
+    }
+    // The client picks its own chunk size (bounded by ours) so the two sides
+    // are not silently coupled to one hard-coded constant.
+    const chunkSize = opts.chunkSize ?? this.maxChunkSize;
+    if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkSize > this.maxChunkSize) {
+      throw new UploadError(
+        `chunkSize must be a positive integer no greater than ${this.maxChunkSize}`,
+        400,
+        'invalid-request',
+      );
     }
     if (!Number.isSafeInteger(opts.totalChunks) || opts.totalChunks < 0) {
-      throw new UploadError('totalChunks must be a non-negative integer', 400);
+      throw new UploadError('totalChunks must be a non-negative integer', 400, 'invalid-request');
     }
     if ((opts.totalSize === 0) !== (opts.totalChunks === 0)) {
-      throw new UploadError('Empty files require zero chunks; non-empty files require chunks', 400);
+      throw new UploadError(
+        'Empty files require zero chunks; non-empty files require chunks',
+        400,
+        'invalid-request',
+      );
     }
-    const expectedChunks = Math.ceil(opts.totalSize / this.maxChunkSize);
+    const expectedChunks = Math.ceil(opts.totalSize / chunkSize);
     if (opts.totalChunks !== expectedChunks) {
       throw new UploadError(
-        `totalChunks must be ${expectedChunks} for ${this.maxChunkSize} byte chunks`,
+        `totalChunks must be ${expectedChunks} for ${chunkSize} byte chunks`,
         400,
+        'invalid-request',
       );
     }
 
     const filenameKey = this.filenameKey(filename);
     if (this.reservedNames.has(filenameKey)) {
-      throw new UploadError(`An upload for "${filename}" is already in progress`, 409);
+      throw new UploadError(
+        `An upload for "${filename}" is already in progress`,
+        409,
+        'upload-in-progress',
+      );
     }
     this.reservedNames.add(filenameKey);
 
     try {
-      try {
-        await access(join(this.downloadsDir, filename));
-        throw new UploadError(`File "${filename}" already exists`, 409);
-      } catch (err) {
-        if (err instanceof UploadError) throw err;
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      if (!opts.overwrite) {
+        try {
+          await access(join(this.downloadsDir, filename));
+          throw new UploadError(`File "${filename}" already exists`, 409, 'file-exists');
+        } catch (err) {
+          if (err instanceof UploadError) throw err;
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
       }
 
       const id = randomUUID();
@@ -128,6 +170,8 @@ export class UploadManager {
         filenameKey,
         totalSize: opts.totalSize,
         totalChunks: opts.totalChunks,
+        chunkSize,
+        overwrite: opts.overwrite === true,
         dir,
         uploaded: new Map(),
         completing: false,
@@ -145,19 +189,20 @@ export class UploadManager {
     const session = this.requireSession(uploadId);
     if (session.completing) throw new UploadError('Upload is being finalized', 409);
     if (!Number.isSafeInteger(index) || index < 0 || index >= session.totalChunks) {
-      throw new UploadError('Chunk index is out of range', 400);
+      throw new UploadError('Chunk index is out of range', 400, 'invalid-request');
     }
-    if (data.length > this.maxChunkSize) {
-      throw new UploadError(`Chunk exceeds the ${this.maxChunkSize} byte limit`, 413);
+    if (data.length > session.chunkSize) {
+      throw new UploadError(`Chunk exceeds the ${session.chunkSize} byte limit`, 413, 'too-large');
     }
     const expectedSize =
       index === session.totalChunks - 1
-        ? session.totalSize - this.maxChunkSize * (session.totalChunks - 1)
-        : this.maxChunkSize;
+        ? session.totalSize - session.chunkSize * (session.totalChunks - 1)
+        : session.chunkSize;
     if (data.length !== expectedSize) {
       throw new UploadError(
         `Chunk ${index} has ${data.length} bytes; expected ${expectedSize}`,
         400,
+        'invalid-request',
       );
     }
 
@@ -223,10 +268,23 @@ export class UploadManager {
 
       const finalPath = join(this.downloadsDir, session.filename);
       try {
-        await link(assemblyPath, finalPath);
+        // link() refuses to clobber, which is what we want by default. An
+        // explicit overwrite uses rename(), which replaces atomically on both
+        // POSIX and Windows (MoveFileEx with REPLACE_EXISTING).
+        if (session.overwrite) await rename(assemblyPath, finalPath);
+        else await link(assemblyPath, finalPath);
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-          throw new UploadError(`File "${session.filename}" already exists`, 409);
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST') {
+          throw new UploadError(`File "${session.filename}" already exists`, 409, 'file-exists');
+        }
+        // Windows refuses to replace a file another process still has open.
+        if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+          throw new UploadError(
+            `"${session.filename}" is open in another program; close it and retry`,
+            409,
+            'file-in-use',
+          );
         }
         throw err;
       }
@@ -254,7 +312,7 @@ export class UploadManager {
 
   private requireSession(id: string): UploadSession {
     const session = this.sessions.get(id);
-    if (!session) throw new UploadError('Upload session not found or expired', 404);
+    if (!session) throw new UploadError('Upload session not found or expired', 404, 'not-found');
     return session;
   }
 
@@ -291,7 +349,7 @@ export class UploadManager {
   private safeFilename(raw: string): string {
     const filename = basename(raw.trim());
     if (!filename || filename === '.' || filename === '..') {
-      throw new UploadError('Invalid filename', 400);
+      throw new UploadError('Invalid filename', 400, 'invalid-request');
     }
     return filename;
   }
