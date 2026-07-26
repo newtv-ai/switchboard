@@ -391,11 +391,13 @@ export function WorkgroupView({ id, onAttach, onBack }: WorkgroupViewProps): JSX
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {available.map((s) => (
               <button
-                key={s.adapterId}
+                key={s.adapterId ?? s.command}
                 type="button"
                 className="btn btn-primary"
                 disabled={busy}
-                onClick={() => wrap(() => addMember(id, s.adapterId))}
+                onClick={() =>
+                  wrap(() => addMember(id, { adapterId: s.adapterId, command: s.command }))
+                }
               >
                 + {s.displayName}
                 {s.version ? ` v${s.version}` : ''}

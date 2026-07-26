@@ -28,7 +28,7 @@ export interface WorkgroupSummary {
 }
 
 export interface CliScanResult {
-  adapterId: string;
+  adapterId?: string;
   displayName: string;
   command?: string;
   path?: string;
@@ -60,10 +60,11 @@ export function createWorkgroup(name: string, cwd: string): Promise<Workgroup> {
   return fetch('/api/workgroups', POST({ name, cwd })).then((r) => json<Workgroup>(r));
 }
 
-export function addMember(id: string, adapterId: string): Promise<AgentMember> {
-  return fetch(`/api/workgroups/${id}/members`, POST({ adapterId })).then((r) =>
-    json<AgentMember>(r),
-  );
+export function addMember(
+  id: string,
+  target: Pick<CliScanResult, 'adapterId' | 'command'>,
+): Promise<AgentMember> {
+  return fetch(`/api/workgroups/${id}/members`, POST(target)).then((r) => json<AgentMember>(r));
 }
 
 export function setMemberRole(id: string, sessionId: string, role: MemberRole): Promise<unknown> {

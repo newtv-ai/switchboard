@@ -17,6 +17,11 @@ import {
 } from './shared-context.js';
 import type { WorkgroupStore } from './workgroup-store.js';
 
+export interface WorkgroupMemberTarget {
+  adapterId?: string;
+  command?: string;
+}
+
 /**
  * Manages workgroups on top of the SessionManager. A workgroup is a thin layer:
  * members are ordinary Sessions referenced by id, plus a shared project folder
@@ -104,16 +109,25 @@ export class WorkgroupManager {
   }
 
   /** Option B: spawn a fresh CLI session in the workgroup's folder and add it. */
-  async addMember(groupId: string, adapterId: string): Promise<AgentMember> {
+  async addMember(groupId: string, target: WorkgroupMemberTarget): Promise<AgentMember> {
     const wg = this.require(groupId);
-    const session = this.sessions.spawn({
-      adapterId,
-      cwd: wg.cwd,
-      name: `${adapterId}@${wg.name}`,
-    });
+    const adapterId = target.adapterId?.trim();
+    const command = target.command?.trim();
+    if ((!adapterId && !command) || (adapterId && command)) {
+      throw new Error('Provide exactly one of adapterId or command');
+    }
+    const agentId = adapterId ?? command;
+    if (!agentId) throw new Error('Adapter or command is required');
+    const session = adapterId
+      ? this.sessions.spawn({ adapterId, cwd: wg.cwd, name: `${agentId}@${wg.name}` })
+      : this.sessions.spawnRaw({
+          command: agentId,
+          cwd: wg.cwd,
+          name: `${agentId}@${wg.name}`,
+        });
     const member: AgentMember = {
       sessionId: session.id,
-      adapterId,
+      adapterId: agentId,
       role: 'active',
       joinedAt: new Date().toISOString(),
     };
@@ -122,7 +136,7 @@ export class WorkgroupManager {
     await appendTimeline(wg.contextDir, {
       ts: member.joinedAt,
       type: 'member.joined',
-      adapterId,
+      adapterId: agentId,
       sessionId: session.id,
     });
     return member;

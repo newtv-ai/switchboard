@@ -125,3 +125,43 @@ test('notifies attached clients before manager cleanup disposes an exited Sessio
   assert.equal(exitCode, 7);
   assert.equal(manager.get(session.id), undefined);
 });
+
+test('rejects structured capability claims when the adapter has no parser', () => {
+  const manager = new SessionManager();
+  assert.throws(
+    () =>
+      manager.registerAdapter({
+        ...adapter,
+        manifest: { ...adapter.manifest, capabilities: ['tool-use'] },
+      }),
+    /declares structured capabilities without a parser/,
+  );
+});
+
+test('exposes structured capabilities only when that Session enables its parser', async () => {
+  const manager = new SessionManager();
+  manager.registerAdapter({
+    ...adapter,
+    manifest: { ...adapter.manifest, id: 'structured', capabilities: ['tool-use'] },
+    createParser: () => ({
+      feed: () => [],
+      getState: () => 'running',
+    }),
+  });
+
+  const raw = manager.register({
+    adapterId: 'structured',
+    cwd: process.cwd(),
+    backend: new FakeBackend(),
+  });
+  const structured = manager.register({
+    adapterId: 'structured',
+    cwd: process.cwd(),
+    backend: new FakeBackend(),
+    enableParser: true,
+  });
+
+  assert.deepEqual(raw.capabilities, []);
+  assert.deepEqual(structured.capabilities, ['tool-use']);
+  await manager.shutdown();
+});

@@ -9,7 +9,7 @@
 # What it does:
 #   1. Verifies Node.js >= 22 (errors with install hint if missing/too old).
 #   2. `npm install` at the repo root (workspaces pull every sub-package).
-#   3. Builds @switchboard/sdk + core + server.
+#   3. Builds all runtime packages, including the optional Camera module.
 #   4. `npm link` inside packages/server so the `sw` / `switchboard` binaries
 #      are on your PATH. Skip with -NoLink.
 #   5. (optional) Opens TCP 8787 (server) and 5173 (vite dev) in the firewall
@@ -65,12 +65,8 @@ npm install
 if ($LASTEXITCODE -ne 0) { Write-Err2 'npm install failed.'; exit 1 }
 
 # --- 3. Build ---------------------------------------------------------------
-Write-Step 'Building workspace libraries...'
-npm run build -w @switchboard/sdk
-if ($LASTEXITCODE -ne 0) { exit 1 }
-npm run build -w @switchboard/core
-if ($LASTEXITCODE -ne 0) { exit 1 }
-npm run build -w @switchboard/server
+Write-Step 'Building runtime packages...'
+npm run build:runtime
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # --- 4. Link `sw` globally --------------------------------------------------

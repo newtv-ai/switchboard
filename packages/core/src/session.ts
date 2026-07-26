@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import {
   type AgentAdapter,
+  type AgentCapability,
   type AgentEvent,
   type AgentState,
   type Parser,
@@ -211,6 +212,10 @@ export class Session implements SessionHandle {
 
   get lastActivityAt(): Date {
     return this._lastActivityAt;
+  }
+
+  get capabilities(): readonly AgentCapability[] {
+    return this.parser ? this.adapter.manifest.capabilities : [];
   }
 
   summary(): SessionSummary {

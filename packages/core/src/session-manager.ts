@@ -13,6 +13,16 @@ export interface SpawnOpts {
   name?: string;
 }
 
+export interface SpawnRawOpts {
+  command: string;
+  args?: readonly string[];
+  cwd: string;
+  env?: Readonly<Record<string, string>>;
+  cols?: number;
+  rows?: number;
+  name?: string;
+}
+
 export interface RegisterOpts {
   adapterId: string;
   cwd: string;
@@ -60,6 +70,9 @@ export class SessionManager {
     if (this.adapters.has(id)) {
       throw new Error(`Adapter already registered: ${id}`);
     }
+    if (adapter.manifest.capabilities.length > 0 && !adapter.createParser) {
+      throw new Error(`Adapter ${id} declares structured capabilities without a parser`);
+    }
     this.adapters.set(id, adapter);
   }
 
@@ -93,6 +106,37 @@ export class SessionManager {
         source: 'spawned',
         name: opts.name,
         enableParser: true,
+      }),
+    );
+  }
+
+  /** Start a detected CLI without a dedicated adapter in raw PTY mode. */
+  spawnRaw(opts: SpawnRawOpts): Session {
+    const command = opts.command.trim();
+    if (!command) throw new Error('Raw command is required');
+    const adapter = this.requireAdapter('passthrough');
+    const backend = new LocalPtyBackend({
+      command: resolveCommand(command),
+      args: [...(opts.args ?? [])],
+      env: {
+        ...(process.env as Record<string, string>),
+        ...(opts.env ?? {}),
+        TERM: 'xterm-256color',
+      },
+      cwd: opts.cwd,
+      cols: opts.cols ?? DEFAULT_COLS,
+      rows: opts.rows ?? DEFAULT_ROWS,
+    });
+
+    return this.attachSession(
+      new Session({
+        adapter,
+        cwd: opts.cwd,
+        backend,
+        source: 'spawned',
+        name: opts.name,
+        commandName: command,
+        enableParser: false,
       }),
     );
   }

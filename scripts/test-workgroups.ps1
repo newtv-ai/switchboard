@@ -20,7 +20,8 @@ function ApiPost($path, $obj) {
 }
 function Start-Sb {
   $env:PORT = '8799'; $env:HOST = '127.0.0.1'; $env:LOG_LEVEL = 'error'
-  $proc = Start-Process -FilePath 'npx' -ArgumentList 'tsx', 'packages/server/src/index.ts' -WorkingDirectory $repo -PassThru -WindowStyle Hidden
+  $node = (Get-Command node).Source
+  $proc = Start-Process -FilePath $node -ArgumentList 'packages/server/dist/index.js' -WorkingDirectory $repo -PassThru -WindowStyle Hidden
   for ($i = 0; $i -lt 50; $i++) { Start-Sleep -Milliseconds 500; try { Invoke-RestMethod "$base/health" -TimeoutSec 2 | Out-Null; return $proc } catch {} }
   return $proc
 }
@@ -48,8 +49,8 @@ Check "server up" ((ApiGet '/health').ok -eq $true)
 
 # --- P1 scan ---
 $scan = ApiGet '/api/scan'
-Check "scan: >=1 available CLI" (($scan | Where-Object { $_.status -eq 'available' }).Count -ge 1)
-Check "scan: reports versions" (($scan | Where-Object { $_.version }).Count -ge 1)
+Check "scan: >=1 available CLI" (@($scan | Where-Object { $_.status -eq 'available' }).Count -ge 1)
+Check "scan: reports versions" (@($scan | Where-Object { $_.version }).Count -ge 1)
 
 # --- P2 / multi-project: dedupe, isolation, cwd-exists, scaffold/injection ---
 $wgA = ApiPost '/api/workgroups' @{ cwd = $projA }; $ids += $wgA.id
@@ -68,6 +69,9 @@ Check "A: CLAUDE.md injected" ((Get-Content (Join-Path $projA 'CLAUDE.md') -Raw)
 $m1 = ApiPost "/api/workgroups/$($wgA.id)/members" @{ adapterId = 'passthrough' }
 Check "addMember: spawned, role=active" ($m1.role -eq 'active')
 Check "addMember: session in /sessions" ((ApiGet '/sessions' | Where-Object { $_.id -eq $m1.sessionId }).Count -eq 1)
+$mRaw = ApiPost "/api/workgroups/$($wgA.id)/members" @{ command = 'node' }
+Check "addMember raw: adapter-less command starts" (($mRaw.adapterId -eq 'node') -and ($mRaw.role -eq 'active'))
+Check "addMember raw: session uses passthrough PTY" ((ApiGet '/sessions' | Where-Object { $_.id -eq $mRaw.sessionId }).adapterId -eq 'passthrough')
 ApiPost "/api/workgroups/$($wgA.id)/members/$($m1.sessionId)/role" @{ role = 'idle' } | Out-Null
 $fullA = ApiGet "/api/workgroups/$($wgA.id)"
 Check "setRole -> idle" (($fullA.members | Where-Object { $_.sessionId -eq $m1.sessionId }).role -eq 'idle')

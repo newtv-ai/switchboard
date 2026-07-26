@@ -41,8 +41,8 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     send({
       type: 'ready',
       sessionId: s.id,
-      adapter,
-      capabilities: adapter.capabilities,
+      adapter: { ...adapter, capabilities: s.capabilities },
+      capabilities: s.capabilities,
       replay: s.getReplay().toString('utf8'),
       summary: s.summary(),
     });

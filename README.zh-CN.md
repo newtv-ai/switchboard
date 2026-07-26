@@ -263,7 +263,7 @@ curl http://<dev-ip>:8787/health     # 应返回 {"ok":true,"sessions":0}
 
 1. **扫描** —— 会话列表点 **Agents**,看本机装了哪些 AI CLI(Claude Code、Codex、Antigravity……)。
 2. **建工作群** —— 点 **Workgroups → + New workgroup**,选项目文件夹。一个文件夹一个工作群,其共享记忆跨会话累积。
-3. **加 AI** —— 每个都在该文件夹里启动。可切换成员角色(active / observer / idle)。
+3. **加 AI** —— 每个都在该文件夹里启动；没有专属 adapter 的 CLI 走 raw 终端透传。可切换成员角色(active / observer / idle)。
 4. **任务** —— 发布任务并**分派**给某成员;**Peek** 查看任一成员的近期输出。
 5. **工作流** —— 内置四步 SOP:规划 → 执行 → 审计 → 修 bug。
 6. **交接** —— 带一段笔记把活从一个 AI 交给另一个(写入 `.switchboard/handoff.md`)。

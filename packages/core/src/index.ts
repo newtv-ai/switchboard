@@ -20,6 +20,7 @@ export {
   type SessionManagerListener,
   type SessionManagerOpts,
   type SpawnOpts,
+  type SpawnRawOpts,
   type RegisterOpts,
 } from './session-manager.js';
 export {

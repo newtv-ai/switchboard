@@ -438,7 +438,7 @@ Run several AI CLIs against **one project with shared context**, driven from you
 
 1. **Scan** — on the session list, tap **Agents** to see which AI CLIs are installed (Claude Code, Codex, Antigravity, …).
 2. **Create a workgroup** — tap **Workgroups → + New workgroup**, pick the project folder. One workgroup per folder; its shared memory accumulates across sessions.
-3. **Add AIs** — each starts in that folder. Toggle each member's role (active / observer / idle).
+3. **Add AIs** — each starts in that folder. CLIs without a dedicated adapter run through raw terminal passthrough. Toggle each member's role (active / observer / idle).
 4. **Tasks** — post a task and **dispatch** it to a member; **peek** any member's recent output.
 5. **Workflow** — run the built-in four-step SOP: planning → execution → audit → bugfix.
 6. **Handoff** — hand work from one AI to another with a note (writes `.switchboard/handoff.md`).
@@ -447,7 +447,7 @@ Updates are **live** over WebSocket — open the same workgroup on two devices a
 
 > **Heads-up:** creating a workgroup writes into the chosen project folder — a `.switchboard/` directory plus a small managed block in `AGENTS.md`/`CLAUDE.md` (so agents auto-read the shared context). Pick a folder you're OK with this in.
 
-Regression test: `powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1` (28 end-to-end checks). Design notes: `SPEC.md` §4.6.
+Regression test: `powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1` (30 end-to-end checks). Design notes: `SPEC.md` §4.6.
 
 ## FAQ
 

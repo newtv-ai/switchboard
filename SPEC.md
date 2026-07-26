@@ -277,6 +277,12 @@ export interface ActionContext {
 export type SpecialKey = "Enter" | "Escape" | "Tab" | "Up" | "Down" | "Ctrl+C" | "Ctrl+D";
 ```
 
+A non-empty `capabilities` list is a structured-output contract: the adapter
+must provide `createParser()`. `SessionManager.registerAdapter()` rejects
+capability claims without a parser so the UI never advertises events the
+runtime cannot emit. The `/ws ready` message further filters capabilities by
+whether that specific Session enabled its parser (wrapped raw-TUI Sessions do not).
+
 **Stability contract**:
 - `AgentAdapter`, `AgentManifest`, `AgentEvent`, `AgentState`, `SpecialKey` are **public stable API** as of v1.0.
 - Breaking changes require a major bump of `@<scope>/sdk` AND a migration guide in `docs/adapter-migration.md`.
@@ -312,7 +318,7 @@ id. Added 2026-06-27 (see §8 Phase 8, §11).
 
 - **Model** (`packages/core/src/workgroup.ts`): `Workgroup { id, name, cwd, contextDir, members }`; `AgentMember { sessionId, adapterId, role: "active"|"observer"|"idle", joinedAt }`.
 - **One workgroup per project folder** (read-one model): `create()` resolves the cwd, **requires it to exist**, and **dedupes by folder** (case-insensitive on Windows/macOS) so a project's shared memory accumulates instead of fragmenting. Default name = folder basename.
-- **Members spawn on demand** (Option B): adding a member server-spawns a CLI in the workgroup's folder (`SessionManager.spawn`); it's also a normal entry in `/sessions`.
+- **Members spawn on demand** (Option B): adding a member server-spawns a CLI in the workgroup's folder; adapter-backed CLIs use `SessionManager.spawn`, while detected CLIs without an adapter use `SessionManager.spawnRaw` and the passthrough PTY backend. Both are normal entries in `/sessions`.
 - **Shared context = project-local Markdown** at `<cwd>/.switchboard/` (`context.md`, `decisions.md`, `handoff.md`, `artifacts/`, `timeline.jsonl`) — the cross-agent protocol (cf. CCB's `.ccb/`). On create, an idempotent managed block is injected into the project's `AGENTS.md` and `CLAUDE.md` so agents auto-read it. Per-file writes are serialized (single-writer queue).
 - **Tasks** (`task-*.ts`): dispatch = write the (single-line) task to the assigned member's PTY stdin. Cross-AI **peek** returns another session's recent output (ring buffer, ANSI-stripped, approximate).
 - **Workflow** (`workflow*.ts`): four-step SOP (planning → execution → audit → bugfix → done) that creates a phase-templated task per step.
@@ -322,7 +328,7 @@ id. Added 2026-06-27 (see §8 Phase 8, §11).
 #### REST + WS surface
 - `GET /api/scan` — detect installed AI CLIs (adapters' `install.detect()` + probes of `gemini`/`qwen`/`opencode`/`aider`/`cursor`).
 - `GET|POST /api/workgroups`, `GET /api/workgroups/:id`
-- `POST .../:id/members`, `POST .../members/:sessionId/role`, `DELETE .../members/:sessionId`, `POST .../:id/handoff`
+- `POST .../:id/members` with exactly one of `{ adapterId }` or `{ command }`; `POST .../members/:sessionId/role`, `DELETE .../members/:sessionId`, `POST .../:id/handoff`
 - `GET|POST .../:id/tasks`, `POST .../tasks/:taskId/assign`, `POST .../tasks/:taskId/status`
 - `GET .../:id/workflow`, `POST .../workflow/start`, `POST .../workflow/advance`
 - `GET /api/sessions/:id/peek?lines=N`
@@ -508,7 +514,7 @@ Phone-usability follow-ups landed alongside Phase 2 (would otherwise be Phase 5)
 - [x] P4 four-step workflow templates
 - [x] P5 manual handoff (idea #9; token auto-switch deliberately not built — no usage-data source)
 - [x] Live workgroup WS broadcast (`/workgroups/ws`)
-- [x] Gate: `scripts/test-workgroups.ps1` — 28/28 end-to-end checks pass (incl. restart persistence)
+- [x] Gate: `scripts/test-workgroups.ps1` — 30/30 end-to-end checks pass (including raw adapter-less spawning and restart persistence)
 
 ---
 
@@ -559,7 +565,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
-- 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Added Node/tsx lifecycle tests, including ten consecutive real transport drops and server-restart recovery.
+- 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Adapter-less scanned CLIs now start in Workgroups through raw passthrough; structured capabilities require a parser; installers build Camera in explicit dependency order. Runtime support is aligned to Node.js 22+. Added Node/tsx lifecycle tests, including ten consecutive real transport drops and server-restart recovery.
 - 2026-06-27 — v1.1 — **Multi-AI Workgroups** (Phase 8, §4.6): CLI scan + `claude` adapter; workgroup model (one-per-folder, dedupe, Option-B spawn); project-local `.switchboard/` shared context with AGENTS/CLAUDE injection; tasks + dispatch + peek; four-step workflow; manual handoff; live `/workgroups/ws` broadcast; atomic JSON persistence. `scripts/test-workgroups.ps1` 28/28 green. Token auto-switch intentionally not built (no usage-data source).
 - 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector, distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
 - 2026-05-23 — v0.9 — **Phase 2 gate PASSED**: live multi-client test confirmed across phone + desktop. Wrapper now honors server-driven resize when running headless (no local TTY), so background wrappers correctly adopt browser-negotiated PTY size. Quick-actions toolbar hidden on viewports ≥ 600px (physical keyboards present).

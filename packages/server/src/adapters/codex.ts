@@ -31,7 +31,7 @@ export const codexAdapter: AgentAdapter = {
     displayName: 'Codex',
     adapterVersion: '0.1.0',
     agentVersionRange: '*',
-    capabilities: ['tool-use', 'approval-flow'],
+    capabilities: [],
     install: {
       detect: () => detectCommand('codex'),
       hint: 'Install the OpenAI Codex CLI — https://github.com/openai/codex',

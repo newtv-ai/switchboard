@@ -3,8 +3,8 @@ import { detectCommand } from './detect.js';
 
 /** One row of the "what AI CLIs are on this machine" scan. */
 export interface CliScanResult {
-  /** Adapter id when there's a dedicated adapter, else the probed command name. */
-  adapterId: string;
+  /** Adapter id when there's a dedicated adapter. */
+  adapterId?: string;
   displayName: string;
   /** The command probed (set for adapter-less probes). */
   command?: string;
@@ -57,7 +57,6 @@ export async function scanClis(sessions: SessionManager): Promise<CliScanResult[
       const r = await detectCommand(command);
       if (!r.installed) return null;
       return {
-        adapterId: command,
         displayName: command,
         command,
         path: r.path,

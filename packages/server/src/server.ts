@@ -197,10 +197,16 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   // Option B: spawn a fresh CLI session in the workgroup's folder and add it.
   app.post('/api/workgroups/:id/members', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { adapterId?: string };
-    if (!body.adapterId) return reply.code(400).send({ error: 'adapterId required' });
+    const body = (req.body ?? {}) as { adapterId?: string; command?: string };
+    const adapterId = typeof body.adapterId === 'string' ? body.adapterId.trim() : undefined;
+    const command = typeof body.command === 'string' ? body.command.trim() : undefined;
+    if ((!adapterId && !command) || (adapterId && command)) {
+      return reply.code(400).send({ error: 'Provide exactly one of adapterId or command' });
+    }
     try {
-      return await workgroups.addMember(id, body.adapterId);
+      if (adapterId) return await workgroups.addMember(id, { adapterId });
+      if (command) return await workgroups.addMember(id, { command });
+      return reply.code(400).send({ error: 'Adapter or command is required' });
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
     }

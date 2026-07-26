@@ -22,7 +22,7 @@ export const antigravityAdapter: AgentAdapter = {
     displayName: 'Antigravity',
     adapterVersion: '0.1.0',
     agentVersionRange: '*',
-    capabilities: ['tool-use', 'approval-flow'],
+    capabilities: [],
     install: {
       detect: () => detectCommand('agy'),
       hint: 'Install the Google Antigravity CLI (agy) — https://github.com/google-antigravity/antigravity-cli',

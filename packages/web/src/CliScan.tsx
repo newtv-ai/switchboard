@@ -55,7 +55,7 @@ export function CliScan({ onClose }: CliScanProps): JSX.Element {
           {results.length > 0 && (
             <ul className="session-list">
               {results.map((r) => (
-                <li key={r.adapterId}>
+                <li key={r.adapterId ?? r.command}>
                   <div className="session-card">
                     <div className="session-card-row">
                       <span className="session-name">{r.displayName}</span>
