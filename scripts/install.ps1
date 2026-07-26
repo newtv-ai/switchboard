@@ -80,7 +80,19 @@ if (-not $NoLink) {
       Write-Warn2 '  node packages/server/dist/index.js'
       exit 1
     }
-    Write-Ok 'sw / switchboard are now on your PATH (new shell required to pick it up).'
+    # A zero exit code only means the shims were written into the global npm
+    # prefix -- it says nothing about that prefix being on PATH. Asserting
+    # success here is exactly how you get "'sw' is not recognized" later.
+    if (Get-Command sw -ErrorAction SilentlyContinue) {
+      Write-Ok 'sw / switchboard resolve on your PATH.'
+    } else {
+      $prefix = (npm prefix -g | Out-String).Trim()
+      Write-Warn2 "Linked, but 'sw' does not resolve in this shell."
+      Write-Warn2 "Global npm prefix: $prefix"
+      Write-Warn2 'Open a NEW terminal and run `sw run claude`. If it still fails, that'
+      Write-Warn2 'folder is not on your PATH -- add it, or skip the shim entirely:'
+      Write-Warn2 "  node $root\packages\server\dist\index.js run claude"
+    }
   } finally {
     Pop-Location
   }

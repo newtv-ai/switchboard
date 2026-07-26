@@ -103,7 +103,7 @@ What the installer does:
 1. Verifies Node version.
 2. `npm install` (workspaces handle every package).
 3. Builds every runtime package (`sdk`, `core`, `camera`, `server`) in dependency order.
-4. `npm link` so the `sw` and `switchboard` commands are on your PATH.
+4. `npm link` so the `sw` and `switchboard` commands are on your PATH. This step is the **only** thing that creates `sw` — `npm install` + `npm run build` on their own do not. Open a new terminal afterwards, and see [`sw` is not recognized](#sw-is-not-recognized--sw-command-not-found) if the shell still can't find it.
 
 **node-pty native build (Windows only):** if `npm install` fails on `node-pty`, install [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, then re-run the installer.
 
@@ -128,6 +128,8 @@ sw run codex               # OpenAI Codex CLI
 sw run agy                 # Google Antigravity CLI
 sw run -- bash             # any other command works too
 ```
+
+> `sw` exists only after the installer's `npm link` step. If your shell says it isn't recognized, see the [FAQ entry](#sw-is-not-recognized--sw-command-not-found) — or just skip the shim: `node packages/server/dist/index.js run claude` does the same thing.
 
 Then open `http://localhost:5173` (or your LAN IP) in any browser. Tap the session and you're in.
 
@@ -451,6 +453,30 @@ Updates are **live** over WebSocket — open the same workgroup on two devices a
 Regression test: `powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1` (30 end-to-end checks). Design notes: `SPEC.md` §4.6.
 
 ## FAQ
+
+### `sw` is not recognized / `sw: command not found`
+`sw` is not a separate download. It's the `bin` of `@switchboard/server`, and it lands on your PATH only when something runs `npm link` inside `packages/server` — step 4 of the installer. `npm install` + `npm run build` alone (or double-clicking `start.bat`) do **not** create it.
+
+```bash
+cd packages/server && npm link      # then open a NEW terminal
+```
+
+Still not found? The shims were written into the global npm prefix, but that folder isn't on your PATH:
+
+```bash
+npm prefix -g        # Linux/macOS: shims are in <prefix>/bin; Windows: directly in <prefix>
+```
+
+Ways to lose `sw` after it worked once:
+- **Switching Node versions** (nvm / fnm / a second Node install). Each Node install has its own global prefix, so a link made under one version is invisible under another. Re-run `npm link` after switching.
+- **Moving or renaming the repo folder.** `npm link` symlinks into your working copy; move it and the shim dangles.
+
+Fallback that never depends on PATH:
+
+```bash
+node packages/server/dist/index.js run claude    # same as `sw run claude`
+node packages/server/dist/index.js               # same as `sw`
+```
 
 ### Phone shows "site can't be reached"
 - Make sure `npm run dev` is actually running (look for `Server listening` + `vite ready`).

@@ -73,7 +73,18 @@ if [ "$LINK" -eq 1 ]; then
     yellow "  node packages/server/dist/index.js"
     exit 1
   }
-  green "✓ sw / switchboard are now on your PATH"
+  # A zero exit code only means the shims were written into the global npm
+  # prefix — it says nothing about that prefix being on PATH. Asserting
+  # success here is exactly how you get "sw: command not found" later.
+  if command -v sw >/dev/null 2>&1; then
+    green "✓ sw / switchboard resolve on your PATH ($(command -v sw))"
+  else
+    yellow "Linked, but 'sw' does not resolve in this shell."
+    yellow "Global npm prefix: $(npm prefix -g)  (shims live in <prefix>/bin)"
+    yellow "Open a new shell and run \`sw run claude\`. If it still fails, that"
+    yellow "folder is not on your PATH — add it, or skip the shim entirely:"
+    yellow "  node $ROOT/packages/server/dist/index.js run claude"
+  fi
 else
   yellow "Skipped global link (--no-link). Run with:  node packages/server/dist/index.js"
 fi

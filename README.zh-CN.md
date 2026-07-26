@@ -103,7 +103,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 1. 校验 Node 版本。
 2. `npm install`（workspaces 一次装好所有包）。
 3. 按依赖顺序编译全部运行时包（`sdk`、`core`、`camera`、`server`）。
-4. `npm link`，把 `sw` 和 `switchboard` 命令挂到 PATH 上。
+4. `npm link`，把 `sw` 和 `switchboard` 命令挂到 PATH 上。这一步是**唯一**会生成 `sw` 的地方——只跑 `npm install` + `npm run build` 是不会有 `sw` 的。装完请另开一个终端；如果还是找不到，看 [`sw` 不是内部或外部命令](#sw-不是内部或外部命令--sw-command-not-found)。
 
 **Windows 下 node-pty 原生编译失败时**：装 [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 并勾选 "Desktop development with C++" 工作负载，然后重跑安装脚本。
 
@@ -128,6 +128,8 @@ sw run codex               # OpenAI Codex CLI
 sw run agy                 # Google Antigravity CLI
 sw run -- bash             # 任意命令都行
 ```
+
+> `sw` 只有在安装脚本跑过 `npm link` 之后才存在。终端提示"无法将"sw"项识别为 cmdlet…"就看 [FAQ 这条](#sw-不是内部或外部命令--sw-command-not-found)；也可以完全不用这个 shim：`node packages/server/dist/index.js run claude` 效果一样。
 
 然后用浏览器打开 `http://localhost:5173`（或者你的局域网 IP），点中会话就进去了。
 
@@ -276,6 +278,30 @@ curl http://<dev-ip>:8787/health     # 应返回 {"ok":true,"sessions":0}
 回归测试:`powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1`(30 项端到端检查)。设计说明见 `SPEC.md` §4.6。
 
 ## FAQ
+
+### `sw` 不是内部或外部命令 / `sw: command not found`
+`sw` 不是单独下载的东西，它是 `@switchboard/server` 的 `bin`，只有在 `packages/server` 里跑过 `npm link`（安装脚本第 4 步）之后才会出现在 PATH 上。只跑 `npm install` + `npm run build`（或者直接双击 `start.bat`）**不会**生成它。
+
+```bash
+cd packages/server && npm link      # 然后重开一个终端
+```
+
+还是找不到，说明 shim 写进了全局 npm 前缀，但那个目录不在 PATH 里：
+
+```bash
+npm prefix -g        # Linux/macOS 的 shim 在 <prefix>/bin；Windows 直接在 <prefix> 下
+```
+
+装好之后又丢了，常见两种原因：
+- **换了 Node 版本**（nvm / fnm / 装了第二个 Node）。每个 Node 各有各的全局前缀，在 A 版本下 link 的 `sw`，切到 B 版本就看不见了——切完重跑一次 `npm link`。
+- **仓库目录被移动或改名。** `npm link` 是指向你工作副本的软链，目录一动链接就断了。
+
+完全不依赖 PATH 的兜底用法：
+
+```bash
+node packages/server/dist/index.js run claude    # 等价于 `sw run claude`
+node packages/server/dist/index.js               # 等价于 `sw`
+```
 
 ### 手机显示"无法访问该网站"
 - 先确认 `npm run dev` 真的在跑（看是不是有 `Server listening` + `vite ready`）。
