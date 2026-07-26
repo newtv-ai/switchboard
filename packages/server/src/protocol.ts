@@ -46,6 +46,8 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   /** Actual PTY size after MIN-policy negotiation across all clients. */
   | { type: 'pty-resize'; cols: number; rows: number }
+  /** Wrapper transport went down (input is refused) or came back. */
+  | { type: 'transport'; connected: boolean }
   /** Server keepalive. Mobile browsers cull WebSockets that are silent for
    *  ~10–20 s (visible as the connection flapping when wrapping idle TUIs
    *  like agy, which — unlike claude — emits no cursor-blink traffic). */

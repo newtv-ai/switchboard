@@ -32,3 +32,24 @@ test('stale unbind cannot detach a newer wrapper transport', () => {
   assert.equal(backend.isBound, false);
   assert.deepEqual(second, ['input:b', 'resize:80x24']);
 });
+
+test('connection changes are reported once per real transition', () => {
+  const sink: string[] = [];
+  const transitions: boolean[] = [];
+  const backend = new WrapperBackend();
+  backend.setConnectionListener(() => transitions.push(backend.isConnected()));
+
+  assert.equal(backend.isConnected(), false);
+
+  const unbindFirst = backend.bind(channel(sink));
+  // Superseding transport: still connected the whole time, so no flap is
+  // reported to the Session (and no spurious "offline" banner on the phone).
+  const unbindSecond = backend.bind(channel(sink));
+  unbindFirst();
+  assert.deepEqual(transitions, [true]);
+  assert.equal(backend.isConnected(), true);
+
+  unbindSecond();
+  assert.deepEqual(transitions, [true, false]);
+  assert.equal(backend.isConnected(), false);
+});

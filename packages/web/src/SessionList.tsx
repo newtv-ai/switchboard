@@ -111,7 +111,9 @@ export function SessionList({
                 <button type="button" className="session-card" onClick={() => onAttach(s.id)}>
                   <div className="session-card-row">
                     <span className="session-name">{s.name}</span>
-                    <span className={`session-state state-${s.state}`}>{s.state}</span>
+                    <span className={`session-state state-${s.connected ? s.state : 'error'}`}>
+                      {s.connected ? s.state : 'wrapper offline'}
+                    </span>
                   </div>
                   <div className="session-card-row session-meta">
                     <span className="session-source">{s.source}</span>

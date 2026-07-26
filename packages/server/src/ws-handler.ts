@@ -16,6 +16,9 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
   let session: Session | undefined;
   let handle: ClientHandle | undefined;
   let unsubscribeFromSessionList: (() => void) | undefined;
+  // One notice per outage: the client disables input on the `transport` frame,
+  // so anything that still arrives is a race, not a reason to spam the terminal.
+  let warnedInputDropped = false;
 
   const send = (msg: ServerMessage): void => {
     if (socket.readyState !== socket.OPEN) return;
@@ -36,6 +39,10 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
   };
 
   const attachTo = (s: Session, initialSize?: { cols: number; rows: number }): void => {
+    // Only stop the list feed once we actually have a session: a failed
+    // attach (session already gone) must leave the connection able to see the
+    // list update that explains why.
+    stopSessionList();
     session = s;
     const adapter = s.adapter.manifest;
     send({
@@ -53,6 +60,10 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
         onState: (state) => send({ type: 'state', state }),
         onExit: (code, signal) => send({ type: 'exit', code, signal }),
         onResize: (cols, rows) => send({ type: 'pty-resize', cols, rows }),
+        onTransport: (connected) => {
+          if (connected) warnedInputDropped = false;
+          send({ type: 'transport', connected });
+        },
       },
       initialSize,
     );
@@ -79,7 +90,6 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           return;
         }
         case 'create': {
-          stopSessionList();
           if (session) {
             send({ type: 'error', message: 'already attached to a session' });
             return;
@@ -97,7 +107,6 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           return;
         }
         case 'attach': {
-          stopSessionList();
           if (session) {
             send({ type: 'error', message: 'already attached to a session' });
             return;
@@ -116,7 +125,13 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
             send({ type: 'error', message: 'no attached session' });
             return;
           }
-          session.write(msg.data);
+          if (!session.write(msg.data) && !warnedInputDropped) {
+            warnedInputDropped = true;
+            send({
+              type: 'error',
+              message: 'wrapper is offline — input was not delivered; it will not be replayed',
+            });
+          }
           return;
         }
         case 'resize': {
@@ -144,7 +159,9 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
         }
         case 'kill': {
           const s = sessions.get(msg.sessionId);
-          s?.kill();
+          if (s && !s.kill()) {
+            send({ type: 'error', message: 'wrapper is offline — kill was not delivered' });
+          }
           return;
         }
         case 'pong': {

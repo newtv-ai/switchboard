@@ -25,8 +25,19 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [label, setLabel] = useState<string>('…');
   const [sessionState, setSessionState] = useState<string>('starting');
+  // The phone↔server WS can be perfectly healthy while the *wrapper's* socket
+  // is mid-reconnect. Input during that window reaches the server and is
+  // dropped, so refuse it here and say so instead of swallowing keystrokes.
+  const [wrapperOffline, setWrapperOffline] = useState(false);
+  const wrapperOfflineRef = useRef(false);
+
+  const setWrapperConnected = useCallback((connected: boolean): void => {
+    wrapperOfflineRef.current = !connected;
+    setWrapperOffline(!connected);
+  }, []);
 
   const sendInput = useCallback((data: string): void => {
+    if (wrapperOfflineRef.current) return;
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       const msg: ClientMessage = { type: 'input', data };
@@ -152,6 +163,10 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     let activeSessionId = target.kind === 'attach' ? target.sessionId : undefined;
 
     const sendWs = (msg: ClientMessage): void => {
+      // Keystrokes, swipe-to-PgUp and wheel-to-arrows all funnel through here.
+      // While the wrapper is offline the server would only drop them, so stop
+      // at the source — one banner beats a stream of "not delivered" errors.
+      if (msg.type === 'input' && wrapperOfflineRef.current) return;
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
     };
@@ -202,6 +217,7 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
             activeSessionId = msg.sessionId;
             setLabel(msg.summary.name);
             setSessionState(msg.summary.state);
+            setWrapperConnected(msg.summary.connected);
             if (msg.replay) {
               // Wipe xterm before replaying. 'ready' fires on EVERY (re)attach,
               // including auto-reconnect after a transient WS drop. The server's
@@ -238,6 +254,14 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
             }
             return;
           case 'pty-resize':
+            return;
+          case 'transport':
+            setWrapperConnected(msg.connected);
+            term.write(
+              msg.connected
+                ? '\r\n\x1b[32m[wrapper reconnected — input enabled]\x1b[0m\r\n'
+                : '\r\n\x1b[33m[wrapper offline — input paused until it reconnects]\x1b[0m\r\n',
+            );
             return;
         }
       };
@@ -387,7 +411,8 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     };
     // App.tsx keeps `target` reference-stable until the user navigates back,
     // so depending on the whole object is correct: same reference → no re-run.
-  }, [target, onBack]);
+    // setWrapperConnected is a stable useCallback — listed, never re-runs.
+  }, [target, onBack, setWrapperConnected]);
 
   return (
     <div className="terminal-view">
@@ -398,6 +423,14 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
         <h1>{label}</h1>
         <span className={`status status-${status}`}>{status}</span>
         <span className={`session-state state-${sessionState}`}>{sessionState}</span>
+        {wrapperOffline && (
+          <span
+            className="session-state state-error"
+            title="The wrapper process lost its connection to the server; input is paused until it reconnects."
+          >
+            wrapper offline
+          </span>
+        )}
       </header>
       <QuickActions onSend={sendInput} />
       <div ref={containerRef} className="terminal" />

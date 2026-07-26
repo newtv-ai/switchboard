@@ -30,4 +30,15 @@ export interface SessionBackend {
    * can re-fit.
    */
   setOwnSizeListener?(listener: () => void): void;
+  /**
+   * Optional. Backends whose transport can come and go (WrapperBackend, whose
+   * wrapper may be mid-reconnect) report whether writes can reach the PTY right
+   * now. Backends that own the PTY directly omit it and count as connected.
+   */
+  isConnected?(): boolean;
+  /**
+   * Optional. Called when isConnected() flips, so the Session can tell clients
+   * that input is (or is no longer) going anywhere.
+   */
+  setConnectionListener?(listener: () => void): void;
 }

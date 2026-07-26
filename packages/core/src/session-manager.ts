@@ -40,7 +40,7 @@ export interface SessionManagerOpts {
 
 export type SessionManagerEvent =
   | { type: 'created'; sessionId: string }
-  | { type: 'updated'; sessionId: string; reason: 'activity' | 'state' }
+  | { type: 'updated'; sessionId: string; reason: 'activity' | 'state' | 'transport' }
   | { type: 'exited'; sessionId: string }
   | { type: 'removed'; sessionId: string };
 
@@ -221,6 +221,7 @@ export class SessionManager {
     session.attach({
       onData: () => this.scheduleActivityUpdate(session.id),
       onState: () => this.emit({ type: 'updated', sessionId: session.id, reason: 'state' }),
+      onTransport: () => this.emit({ type: 'updated', sessionId: session.id, reason: 'transport' }),
       onExit: () => {
         // For v1, sessions are removed on exit. Persistent sessions are
         // deferred (SPEC §9 Q3).

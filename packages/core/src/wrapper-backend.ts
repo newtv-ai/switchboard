@@ -24,6 +24,7 @@ export class WrapperBackend implements SessionBackend {
   private disposed = false;
   private _ownSize: { cols: number; rows: number } | undefined;
   private _ownSizeListener: (() => void) | undefined;
+  private _connectionListener: (() => void) | undefined;
   private out: WrapperBackendOutgoing | undefined;
   private binding: symbol | undefined;
 
@@ -38,17 +39,32 @@ export class WrapperBackend implements SessionBackend {
   bind(out: WrapperBackendOutgoing): () => void {
     if (this.disposed) return () => {};
     const binding = Symbol('wrapper-transport');
+    const wasBound = this.isBound;
     this.out = out;
     this.binding = binding;
+    if (!wasBound) this.notifyConnectionChange();
     return () => {
       if (this.binding !== binding) return;
       this.binding = undefined;
       this.out = undefined;
+      this.notifyConnectionChange();
     };
   }
 
   get isBound(): boolean {
     return !this.disposed && this.out !== undefined;
+  }
+
+  isConnected(): boolean {
+    return this.isBound;
+  }
+
+  setConnectionListener(listener: () => void): void {
+    this._connectionListener = listener;
+  }
+
+  private notifyConnectionChange(): void {
+    this._connectionListener?.();
   }
 
   // ─── Own-size negotiation (wrapper's local terminal) ─────────────────────
@@ -101,6 +117,7 @@ export class WrapperBackend implements SessionBackend {
     this.out = undefined;
     this.dataHandlers.clear();
     this.exitHandlers.clear();
+    this._connectionListener = undefined;
   }
 
   // ─── Server-side push API (wrapper → browser direction) ──────────────────

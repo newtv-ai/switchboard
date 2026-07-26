@@ -59,15 +59,20 @@ export class TaskManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
 
-    task.assignee = sessionId;
-    task.assignedAt = new Date().toISOString();
-    task.status = 'running';
-
     // Collapse to a single line: a TUI submits on the first newline, so a
     // multi-line description sent as-is would dispatch only the first line.
     const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
     const msg = `${oneLine(task.title)}: ${oneLine(task.description)} (shared context in .switchboard/context.md; write results to .switchboard/artifacts/, decisions to .switchboard/decisions.md)`;
-    session.write(`${msg}\r`);
+    // Dispatch before recording the assignment: if the member's wrapper is
+    // mid-reconnect the write goes nowhere, and a task marked "running" that
+    // was never delivered is worse than a failed assign.
+    if (!session.write(`${msg}\r`)) {
+      throw new Error(`Session is offline (wrapper reconnecting): ${sessionId}`);
+    }
+
+    task.assignee = sessionId;
+    task.assignedAt = new Date().toISOString();
+    task.status = 'running';
 
     await this.store.save(workgroupId, this.list(workgroupId));
     await appendTimeline(wg.contextDir, {

@@ -13,6 +13,7 @@ export interface SessionSummary {
   createdAt: string;
   lastActivityAt: string;
   bufferBytes: number;
+  connected: boolean;
 }
 
 export type AgentState =
@@ -67,4 +68,5 @@ export type ServerMessage =
   | { type: 'exit'; code: number; signal?: number }
   | { type: 'error'; message: string }
   | { type: 'pty-resize'; cols: number; rows: number }
+  | { type: 'transport'; connected: boolean }
   | { type: 'ping' };

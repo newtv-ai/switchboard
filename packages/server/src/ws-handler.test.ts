@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import type { WebSocket } from '@fastify/websocket';
-import { SessionManager } from '@switchboard/core';
+import { SessionManager, WrapperBackend } from '@switchboard/core';
 import type { SessionBackend } from '@switchboard/core';
 import type { AgentAdapter } from '@switchboard/sdk';
 import { bindWebSocket } from './ws-handler.js';
@@ -103,6 +103,54 @@ test('list-only browser connections receive live Session snapshots', async () =>
 
   backend.pushExit(0);
   assert.deepEqual(snapshots().at(-1)?.list, []);
+
+  socket.close();
+  await manager.shutdown();
+});
+
+test('input is refused, not swallowed, while the wrapper transport is down', async () => {
+  const manager = new SessionManager();
+  manager.registerAdapter(adapter);
+  const socket = new FakeSocket();
+  bindWebSocket(socket as unknown as WebSocket, manager);
+
+  const backend = new WrapperBackend();
+  const written: string[] = [];
+  const unbind = backend.bind({
+    sendInput: (data) => written.push(data),
+    sendResize: () => {},
+    sendKill: () => {},
+  });
+  const session = manager.register({ adapterId: 'test', cwd: process.cwd(), backend });
+
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'attach', sessionId: session.id })));
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'input', data: 'online' })));
+  assert.deepEqual(written, ['online']);
+
+  unbind();
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'input', data: 'offline' })));
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'input', data: 'offline again' })));
+
+  const frames = socket.sent as Array<{ type: string; connected?: boolean; message?: string }>;
+  assert.deepEqual(written, ['online'], 'nothing may be written while unbound');
+  assert.deepEqual(
+    frames.filter((f) => f.type === 'transport').map((f) => f.connected),
+    [false],
+  );
+  // One notice per outage, not one per keystroke.
+  assert.equal(frames.filter((f) => f.type === 'error').length, 1);
+
+  backend.bind({
+    sendInput: (data) => written.push(data),
+    sendResize: () => {},
+    sendKill: () => {},
+  });
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'input', data: 'back' })));
+  assert.deepEqual(written, ['online', 'back']);
+  assert.deepEqual(
+    frames.filter((f) => f.type === 'transport').map((f) => f.connected),
+    [false, true],
+  );
 
   socket.close();
   await manager.shutdown();

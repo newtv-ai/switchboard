@@ -34,6 +34,11 @@ export interface SessionListener {
   onExit?(code: number, signal?: number): void;
   /** Called after the PTY is resized (refit negotiation result). */
   onResize?(cols: number, rows: number): void;
+  /**
+   * Called when the backend transport connects or disconnects (wrapper
+   * reconnecting). While disconnected, writes are refused rather than dropped.
+   */
+  onTransport?(connected: boolean): void;
 }
 
 export interface ClientHandle {
@@ -54,6 +59,8 @@ export interface SessionSummary {
   createdAt: string;
   lastActivityAt: string;
   bufferBytes: number;
+  /** false while a wrapped Session's transport is mid-reconnect. */
+  connected: boolean;
 }
 
 const DEFAULT_BUFFER_SIZE = 2 * 1024 * 1024;
@@ -126,16 +133,25 @@ export class Session implements SessionHandle {
     // Backends with their own viewport (e.g. a wrapper's local terminal)
     // participate in the size negotiation alongside attached browser clients.
     this.backend.setOwnSizeListener?.(() => this.refitToClients());
+
+    this.backend.setConnectionListener?.(() => {
+      const connected = this.connected;
+      for (const c of [...this.clients.values()]) c.listener.onTransport?.(connected);
+    });
   }
 
   // ─── SessionHandle (write paths) ─────────────────────────────────────────
 
-  write(data: string): void {
+  /** @returns false when the backend transport is down and the data was NOT
+   *  delivered — callers surface that instead of pretending it was typed. */
+  write(data: string): boolean {
+    if (!this.connected) return false;
     this.backend.write(data);
+    return true;
   }
 
-  sendKey(key: SpecialKey): void {
-    this.backend.write(keyBytes(key));
+  sendKey(key: SpecialKey): boolean {
+    return this.write(keyBytes(key));
   }
 
   // ─── Attach / detach ─────────────────────────────────────────────────────
@@ -197,8 +213,16 @@ export class Session implements SessionHandle {
 
   // ─── Control ─────────────────────────────────────────────────────────────
 
-  kill(signal?: string): void {
+  /** @returns false when the request could not reach the process (see write). */
+  kill(signal?: string): boolean {
+    if (!this.connected) return false;
     this.backend.kill(signal);
+    return true;
+  }
+
+  /** False while a wrapped Session's transport is between sockets. */
+  get connected(): boolean {
+    return this.backend.isConnected?.() ?? true;
   }
 
   /** Bytes retained for replay on attach. */
@@ -230,6 +254,7 @@ export class Session implements SessionHandle {
       createdAt: this.createdAt.toISOString(),
       lastActivityAt: this._lastActivityAt.toISOString(),
       bufferBytes: this.buffer.size,
+      connected: this.connected,
     };
   }
 

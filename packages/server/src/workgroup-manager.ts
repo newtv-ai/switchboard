@@ -186,6 +186,12 @@ export class WorkgroupManager {
     if (from === to) throw new Error('Cannot hand off to the same member');
     const toSession = this.sessions.get(toSessionId);
     if (!toSession) throw new Error(`Target session not running: ${toSessionId}`);
+    // Checked before anything is written or persisted: a handoff that flips
+    // roles and appends handoff.md but never reaches the incoming agent leaves
+    // the workgroup claiming a takeover that never happened.
+    if (!toSession.connected) {
+      throw new Error(`Target session is offline (wrapper reconnecting): ${toSessionId}`);
+    }
 
     const ts = new Date().toISOString();
     const body = note?.trim() ? note.trim() : '_(no note provided)_';
