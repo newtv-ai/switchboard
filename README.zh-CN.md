@@ -156,7 +156,7 @@ npm run build -w @switchboard/web
 
 打开 Web UI，点头部的 **Upload** 按钮，会弹出一个小型文件管理面板：
 
-- **手机 → 开发机**：选一个或多个文件上传，文件落在开发机的 `<仓库根目录>/downloads/` 下。上传按 5 MB 分块流式传输，几个 GB 的文件也不会撑爆内存。
+- **手机 → 开发机**：选一个或多个文件上传，文件落在开发机的 `<仓库根目录>/downloads/` 下。上传按 5 MB 分块，全部分块校验完成并原子发布后才出现在列表里；中断传输不会伪装成完整文件。
 - **开发机 → 手机**：在列表里点 **Download**，按浏览器正常下载流程保存。
 
 这就是一个共享目录，没有鉴权——和 Switchboard 其他部分一致，只在局域网 / Tailscale 上跑。
@@ -272,7 +272,7 @@ curl http://<dev-ip>:8787/health     # 应返回 {"ok":true,"sessions":0}
 
 > **注意:** 建工作群会往所选项目文件夹里写东西 —— 一个 `.switchboard/` 目录,以及在 `AGENTS.md`/`CLAUDE.md` 里加一个带标记的小块(让 agent 自动读共享上下文)。请选你接受这点的文件夹。
 
-回归测试:`powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1`(28 项端到端检查)。设计说明见 `SPEC.md` §4.6。
+回归测试:`powershell -ExecutionPolicy Bypass -File scripts/test-workgroups.ps1`(30 项端到端检查)。设计说明见 `SPEC.md` §4.6。
 
 ## FAQ
 

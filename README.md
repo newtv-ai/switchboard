@@ -156,7 +156,7 @@ Install [Tailscale](https://tailscale.com) on both the dev box and the phone, lo
 
 Open the web UI and click **Upload** in the header — this opens a small file manager that lets you:
 
-- **Phone → dev box**: pick one or more files and upload them. Files land in `<repo-root>/downloads/` on the dev box. Uploads are streamed in 5 MB chunks so multi-GB files work without holding the whole file in memory.
+- **Phone → dev box**: pick one or more files and upload them. Files land in `<repo-root>/downloads/` on the dev box. Uploads use 5 MB chunks and appear only after every chunk is verified and atomically published; interrupted transfers never show up as completed files.
 - **Dev box → phone**: click **Download** next to any file in the list; the browser saves it through its normal download flow.
 
 This is intentionally a single shared folder per dev box, with no auth — same trust model as the rest of Switchboard (bind to LAN / Tailscale only).

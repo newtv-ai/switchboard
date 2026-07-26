@@ -46,6 +46,7 @@ Thumbs.db
 .session-state/
 ring-buffers/
 downloads/
+.switchboard-uploads/
 
 # Misc
 提示.txt

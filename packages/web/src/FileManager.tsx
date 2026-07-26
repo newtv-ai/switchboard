@@ -51,6 +51,7 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
       let uploadedBytes = 0;
       const startTime = performance.now();
+      let uploadId: string | undefined;
 
       setUploadProgress((prev) => ({
         ...prev,
@@ -58,6 +59,20 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
       }));
 
       try {
+        const createRes = await fetch('/api/uploads', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            totalSize: file.size,
+            totalChunks,
+          }),
+        });
+        if (!createRes.ok) {
+          throw new Error(`HTTP ${createRes.status}: ${await createRes.text()}`);
+        }
+        uploadId = ((await createRes.json()) as { uploadId: string }).uploadId;
+
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
           const start = chunkIndex * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -66,13 +81,8 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
           const formData = new FormData();
           formData.append('file', chunk, file.name);
 
-          const isAppend = chunkIndex > 0;
-
-          const res = await fetch('/api/upload', {
+          const res = await fetch(`/api/uploads/${uploadId}/chunks/${chunkIndex}`, {
             method: 'POST',
-            headers: {
-              'x-upload-append': isAppend ? 'true' : 'false',
-            },
             body: formData,
           });
 
@@ -99,7 +109,35 @@ export function FileManager({ onClose }: FileManagerProps): JSX.Element {
             },
           }));
         }
+
+        let completeRes: Response;
+        try {
+          completeRes = await fetch(`/api/uploads/${uploadId}/complete`, { method: 'POST' });
+        } catch {
+          // Completion is idempotent server-side; one retry resolves the common
+          // case where the server published the file but the response was lost.
+          completeRes = await fetch(`/api/uploads/${uploadId}/complete`, { method: 'POST' });
+        }
+        if (!completeRes.ok) {
+          throw new Error(`HTTP ${completeRes.status}: ${await completeRes.text()}`);
+        }
+        setUploadProgress((prev) => ({
+          ...prev,
+          [file.name]: {
+            percent: 100,
+            loaded: file.size,
+            total: file.size,
+            speedMBps:
+              file.size > 0
+                ? file.size / 1024 / 1024 / ((performance.now() - startTime) / 1000)
+                : 0,
+          },
+        }));
+        uploadId = undefined;
       } catch (err) {
+        if (uploadId) {
+          await fetch(`/api/uploads/${uploadId}`, { method: 'DELETE' }).catch(() => undefined);
+        }
         const e = err as { name?: string; message?: string };
         console.error(`Error uploading ${file.name}:`, err);
         // On mobile, many failures here are actually the browser refusing to

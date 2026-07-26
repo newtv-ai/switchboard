@@ -1,13 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as nodeUrl from 'node:url';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { type MemberRole, SessionManager } from '@switchboard/core';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { antigravityAdapter } from './adapters/antigravity.js';
 import { claudeAdapter } from './adapters/claude.js';
 import { codexAdapter } from './adapters/codex.js';
@@ -18,6 +16,7 @@ import { PushManager } from './push.js';
 import { peekSession } from './session-peek.js';
 import { TaskManager } from './task-manager.js';
 import { type TaskStatus, TaskStore } from './task-store.js';
+import { MAX_UPLOAD_CHUNK_SIZE, UploadError, UploadManager } from './upload-manager.js';
 import { WorkflowManager } from './workflow-manager.js';
 import { WorkgroupManager } from './workgroup-manager.js';
 import { WorkgroupStore } from './workgroup-store.js';
@@ -38,6 +37,14 @@ export interface StartedServer {
 }
 
 const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+function sendUploadError(reply: FastifyReply, err: unknown) {
+  const code = (err as NodeJS.ErrnoException).code;
+  const statusCode =
+    err instanceof UploadError ? err.statusCode : code === 'FST_REQ_FILE_TOO_LARGE' ? 413 : 500;
+  const message = err instanceof Error ? err.message : 'Internal Server Error';
+  return reply.code(statusCode).send({ error: message });
+}
 
 export async function startServer(opts: StartServerOpts = {}): Promise<StartedServer> {
   const host = opts.host ?? '127.0.0.1';
@@ -63,6 +70,7 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
   const __dirname = path.dirname(nodeUrl.fileURLToPath(import.meta.url));
   const projectRoot = path.join(__dirname, '..', '..', '..');
   const downloadsDir = path.join(projectRoot, 'downloads');
+  const uploads = new UploadManager(downloadsDir, path.join(projectRoot, '.switchboard-uploads'));
 
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -71,13 +79,11 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
 
   await app.register(fastifyWebsocket);
 
-  if (!fs.existsSync(downloadsDir)) {
-    fs.mkdirSync(downloadsDir, { recursive: true });
-  }
+  await uploads.init();
 
   await app.register(fastifyMultipart, {
     limits: {
-      fileSize: 10 * 1024 * 1024 * 1024, // 10 GB limit
+      fileSize: MAX_UPLOAD_CHUNK_SIZE,
     },
   });
 
@@ -89,47 +95,72 @@ export async function startServer(opts: StartServerOpts = {}): Promise<StartedSe
     },
   });
 
-  app.post('/api/upload', async (req, reply) => {
-    const t0 = Date.now();
+  app.post('/api/uploads', async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      filename?: string;
+      totalSize?: number;
+      totalChunks?: number;
+    };
     try {
-      const data = await req.file();
-      if (!data) {
-        return reply.code(400).send({ error: 'No file provided' });
-      }
-
-      const filename = data.filename;
-      // Prevent directory traversal attacks
-      const sanitizedFilename = path.basename(filename);
-      const destPath = path.join(downloadsDir, sanitizedFilename);
-
-      const isAppend = req.headers['x-upload-append'] === 'true';
-      const flags = isAppend ? 'a' : 'w';
-
-      // Count bytes flowing through so we can log throughput per chunk.
-      let bytes = 0;
-      const counter = new Transform({
-        transform(chunk: Buffer, _enc, cb) {
-          bytes += chunk.length;
-          cb(null, chunk);
-        },
+      const created = await uploads.create({
+        filename: typeof body.filename === 'string' ? body.filename : '',
+        totalSize: body.totalSize as number,
+        totalChunks: body.totalChunks as number,
       });
-
-      await pipeline(data.file, counter, fs.createWriteStream(destPath, { flags }));
-
-      const ms = Date.now() - t0;
-      const mbps = ms > 0 ? (bytes / 1024 / 1024 / (ms / 1000)).toFixed(2) : 'inf';
-      req.log.info(
-        `upload: ${sanitizedFilename} append=${isAppend} bytes=${bytes} took=${ms}ms (${mbps} MB/s)`,
-      );
-
-      return { success: true, filename: sanitizedFilename, bytes, durationMs: ms };
+      return reply.code(201).send(created);
     } catch (err) {
-      req.log.error(err);
-      const message = err instanceof Error ? err.message : 'Internal Server Error';
-      // Do NOT include err.stack in the response — leaks internal paths.
-      return reply.code(500).send({ error: message });
+      if (!(err instanceof UploadError)) req.log.error(err);
+      return sendUploadError(reply, err);
     }
   });
+
+  app.post('/api/uploads/:uploadId/chunks/:index', async (req, reply) => {
+    const { uploadId, index: rawIndex } = req.params as { uploadId: string; index: string };
+    try {
+      const data = await req.file();
+      if (!data) return reply.code(400).send({ error: 'No chunk provided' });
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      if (data.file.truncated) {
+        return reply.code(413).send({ error: `Chunk exceeds ${MAX_UPLOAD_CHUNK_SIZE} bytes` });
+      }
+      const index = Number(rawIndex);
+      const result = await uploads.writeChunk(uploadId, index, Buffer.concat(chunks));
+      return { success: true, index, ...result };
+    } catch (err) {
+      if (!(err instanceof UploadError)) req.log.error(err);
+      return sendUploadError(reply, err);
+    }
+  });
+
+  app.post('/api/uploads/:uploadId/complete', async (req, reply) => {
+    const { uploadId } = req.params as { uploadId: string };
+    try {
+      const result = await uploads.complete(uploadId);
+      req.log.info(`upload complete: ${result.filename} bytes=${result.bytes}`);
+      return { success: true, ...result };
+    } catch (err) {
+      if (!(err instanceof UploadError)) req.log.error(err);
+      return sendUploadError(reply, err);
+    }
+  });
+
+  app.delete('/api/uploads/:uploadId', async (req, reply) => {
+    const { uploadId } = req.params as { uploadId: string };
+    try {
+      await uploads.cancel(uploadId);
+      return { success: true };
+    } catch (err) {
+      if (!(err instanceof UploadError)) req.log.error(err);
+      return sendUploadError(reply, err);
+    }
+  });
+
+  app.post('/api/upload', async (_req, reply) =>
+    reply.code(410).send({ error: 'Legacy upload endpoint removed; refresh the web client' }),
+  );
 
   app.get('/api/files', async () => {
     const entries = fs.readdirSync(downloadsDir);

@@ -332,30 +332,44 @@ Session 是否实际启用 parser 过滤能力（wrapped raw-TUI Session 不声�
 
 > 这些接口沿用单 token 信任模型（§4.5）—— 暴露面与 `/sessions` 相同。加成员会在用户给定的文件夹里起进程，这与 `/ws create` 已有的能力一致。
 
+### 4.7 局域网文件传输
+
+文件管理器把完整文件存到 `<repo-root>/downloads/`。大文件上传不再直接
+append 最终文件名，而使用小型会话协议：
+
+- `POST /api/uploads` 用 `filename`、`totalSize`、`totalChunks` 创建上传会话并保留文件名。
+- `POST /api/uploads/:uploadId/chunks/:index` 把一个幂等分块写到公开下载目录之外；单块最大 5 MiB。
+- `POST /api/uploads/:uploadId/complete` 校验分块数和总大小，按序组装后原子发布最终文件。
+- `DELETE /api/uploads/:uploadId` 取消上传并清除临时状态。
+- 已存在的文件名或同名并发上传返回 `409`，不静默覆盖成品。
+- 未完成上传不会出现在文件列表或下载接口中；进程内会话空闲一小时后释放文件名，server 启动时清理超过 24 小时的临时目录。
+- 完成结果保留五分钟幂等窗口，客户端可在成品已发布但最终响应丢失时重试。
+
+基于可信局域网模型，有意不增加逐块密码学哈希：TCP 已检测传输损坏；
+manifest 大小/数量校验、重复分块内容比较和原子发布用于防止应用层截断与
+交错写入。
+
 ---
 
 ## 5. 内置 Adapter（v1）
 
 ### 5.1 `adapter-claude`
-- Spawn：`claude --output-format stream-json --input-format stream-json --include-partial-messages`
-- Parser：NDJSON 行切分；把 Claude SDK 事件类型映射到 `AgentEvent`
-- Actions：`approve`、`reject`、`stop`、`continue`
-- Detect：`claude --version`；初始支持 `^1.0`
-- Env：`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` 缓解 ConPTY 渲染问题（anthropics/claude-code#14599）
+- L1 启动：裸 `claude` TUI，终端透传。
+- Detect：`claude --version`。
+- 目前不声明 L2 parser、结构化 capability 或 L3 action。
 
 ### 5.2 `adapter-codex`
-- Spawn：`codex exec --json`（尽力为之；如果因 MCP 导致 `--json` 被忽略则回落到裸 `codex` —— openai/codex#15451）
-- Parser：解析 NDJSON 事件，同时规范化老 schema（`item_type:assistant_message`）和新 schema（`type:agent_message`）（openai/codex#4776）
-- Actions：`approve`、`reject`、`stop`
-- 版本钉死：对测过的 Codex 版本范围生效；parser 在 schema 不匹配时回落到 L1 raw 模式（打 warning，不崩）
+- L1 启动：`codex --no-alt-screen`；每个 server-spawned Session 使用隔离的临时 `CODEX_HOME`。
+- Detect：`codex --version`。
+- 目前不声明 L2 parser、结构化 capability 或 L3 action。
 
 ### 5.3 `adapter-passthrough`
 - "任意 CLI" 适配器。命令可在配置里改。无 parser。除了发按键外无 action。
-- 没有专属 adapter 的 agent（Antigravity v1、Gemini CLI、自定义脚本）就用这个，直到它们拿到正式 adapter。
+- 没有专属 adapter 的 agent（Gemini CLI、自定义脚本）就用这个，直到它们拿到正式 adapter。
 
-### 5.4 未来：`adapter-antigravity`（延后）
-- 等 Antigravity 2.0 的输出格式稳定再做
-- 已在 §12 邀请贡献者认领
+### 5.4 `adapter-antigravity`
+- L1 启动：裸 `agy` TUI；用 `agy --version` 探测。
+- 目前不声明 L2 parser、结构化 capability 或 L3 action。
 
 ---
 
@@ -558,7 +572,7 @@ switchboard/
 5. **版本号**：每次有意义的变更在本文顶部递增版本。v0.x = 预发布，v1.0 = 首次 npm 发布。
 
 ### 近期变更
-- 2026-07-23 — v1.2 — **核心可靠性整改**：列表模式 `/ws` 客户端实时收到 Session 快照，纯活动时间更新按 Session 节流；监听器按快照派发，清理不会吞掉浏览器退出帧；浏览器发送能容忍 socket 关闭竞态。wrapper 传输采用稳定进程标识与恢复凭据、带代际保护的后端重新绑定、30 秒 server 宽限期、有上限的 PTY 输出缓冲、封顶退避和限时退出帧 flush。server 正常关闭时保留 wrapper 拥有的 PTY；server 重启后拒绝旧 resume，wrapper 自动注册新 Session。扫描到但无 adapter 的 CLI 现在可通过 raw passthrough 加入工作群；结构化 capability 必须有 parser；安装器按明确依赖顺序构建 Camera；运行时基线统一为 Node.js 22+。新增 Node/tsx 生命周期测试，覆盖真实传输连续十次闪断及 server 重启恢复。
+- 2026-07-23 — v1.2 — **核心可靠性整改**：列表模式 `/ws` 客户端实时收到 Session 快照，纯活动时间更新按 Session 节流；监听器按快照派发，清理不会吞掉浏览器退出帧；浏览器发送能容忍 socket 关闭竞态。wrapper 传输采用稳定进程标识与恢复凭据、带代际保护的后端重新绑定、30 秒 server 宽限期、有上限的 PTY 输出缓冲、封顶退避和限时退出帧 flush。server 正常关闭时保留 wrapper 拥有的 PTY；server 重启后拒绝旧 resume，wrapper 自动注册新 Session。扫描到但无 adapter 的 CLI 现在可通过 raw passthrough 加入工作群；结构化 capability 必须有 parser；安装器按明确依赖顺序构建 Camera；文件上传改为隐藏分块会话和原子发布；运行时基线统一为 Node.js 22+。新增 Node/tsx 生命周期与上传测试，覆盖真实传输连续十次闪断及 server 重启恢复。
 - 2026-06-27 — v1.1 — **多 AI 工作群**（Phase 8、§4.6）：CLI 扫描 + `claude` 适配器；工作群模型（一文件夹一群、去重、Option-B 启动）；项目内 `.switchboard/` 共享上下文 + AGENTS/CLAUDE 注入；任务 + 分派 + peek；四步工作流；手动交接；实时 `/workgroups/ws` 广播；原子 JSON 持久化。`scripts/test-workgroups.ps1` 28/28 通过。有意不做 token 自动切换（无用量数据源）。
 - 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。
 - 2026-05-23 — v0.9 — **Phase 2 闸门通过**：跨手机 + 桌面的多客户端实地测试通过。Wrapper 在 headless 跑（没有本地 TTY）时尊重服务端驱动的 resize，所以后台 wrapper 正确采纳浏览器协商的 PTY 尺寸。快捷操作栏在 ≥ 600px 视口（有物理键盘）下隐藏。

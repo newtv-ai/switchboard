@@ -336,30 +336,46 @@ id. Added 2026-06-27 (see §8 Phase 8, §11).
 
 > These endpoints share the single-token trust model (§4.5) — same exposure as `/sessions`. Creating a member spawns a process in a user-supplied folder, the same capability `/ws create` already grants.
 
+### 4.7 LAN file transfer
+
+The file manager stores completed files under `<repo-root>/downloads/`. Large
+uploads use a small session protocol instead of appending directly to the final
+filename:
+
+- `POST /api/uploads` creates a manifest (`filename`, `totalSize`, `totalChunks`) and reserves the filename.
+- `POST /api/uploads/:uploadId/chunks/:index` stores one idempotent chunk outside the public downloads directory. Chunks are capped at 5 MiB.
+- `POST /api/uploads/:uploadId/complete` verifies chunk count and total size, assembles in order, then atomically publishes the final file.
+- `DELETE /api/uploads/:uploadId` cancels and removes partial state.
+- Existing filenames and concurrent uploads for the same name return `409`; uploads never silently overwrite a completed file.
+- Partial uploads are not listed or downloadable. In-process sessions idle for one hour release their filename; stale temporary directories are cleaned after 24 hours on server startup.
+- Completion is idempotent for five minutes, allowing a client to retry when the final response is lost after publication.
+
+Per-chunk cryptographic hashes are intentionally omitted for the trusted-LAN
+model: TCP already detects transport corruption, while manifest size/count,
+idempotent chunk comparison, and atomic publication prevent application-level
+truncation and interleaving.
+
 ---
 
 ## 5. Built-in Adapters (v1)
 
 ### 5.1 `adapter-claude`
-- Spawn: `claude --output-format stream-json --input-format stream-json --include-partial-messages`
-- Parser: NDJSON line splitter; maps Claude SDK event types to `AgentEvent`
-- Actions: `approve`, `reject`, `stop`, `continue`
-- Detect: `claude --version`; supports `^1.0` initially
-- Env: `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` to mitigate ConPTY rendering issues (anthropics/claude-code#14599)
+- L1 spawn: plain `claude` TUI with terminal passthrough.
+- Detect: `claude --version`.
+- No L2 parser, structured capabilities, or L3 actions are declared yet.
 
 ### 5.2 `adapter-codex`
-- Spawn: `codex exec --json` (best-effort; falls back to plain `codex` if `--json` ignored due to MCP — openai/codex#15451)
-- Parser: parses NDJSON events, normalizes both legacy (`item_type:assistant_message`) and current (`type:agent_message`) schemas (openai/codex#4776)
-- Actions: `approve`, `reject`, `stop`
-- Version pin: works against a tested Codex version range; parser falls back to L1 raw mode on schema mismatch (logs a warning, doesn't crash)
+- L1 spawn: `codex --no-alt-screen`, with an isolated temporary `CODEX_HOME` per server-spawned Session.
+- Detect: `codex --version`.
+- No L2 parser, structured capabilities, or L3 actions are declared yet.
 
 ### 5.3 `adapter-passthrough`
 - The "any-CLI" adapter. Configurable command in config. No parser. No actions beyond send-key.
-- This is what unsupported agents (Antigravity v1, Gemini CLI, custom scripts) use until they get a proper adapter.
+- This is what unsupported agents (Gemini CLI, custom scripts) use until they get a proper adapter.
 
-### 5.4 Future: `adapter-antigravity` (deferred)
-- Will land when Antigravity 2.0 has stable output format
-- Opened to contribution in §12
+### 5.4 `adapter-antigravity`
+- L1 spawn: plain `agy` TUI; detect via `agy --version`.
+- No L2 parser, structured capabilities, or L3 actions are declared yet.
 
 ---
 
@@ -565,7 +581,7 @@ This is the rule for keeping the spec from rotting:
 5. **Version bump**: increment the version at the top of this doc on every meaningful change. v0.x = pre-release, v1.0 = first npm publish.
 
 ### Recent changes
-- 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Adapter-less scanned CLIs now start in Workgroups through raw passthrough; structured capabilities require a parser; installers build Camera in explicit dependency order. Runtime support is aligned to Node.js 22+. Added Node/tsx lifecycle tests, including ten consecutive real transport drops and server-restart recovery.
+- 2026-07-23 — v1.2 — **Core reliability remediation**: list-only `/ws` clients now receive live Session snapshots; activity-only updates are throttled per Session; listener dispatch uses snapshots so cleanup cannot suppress browser exit frames; browser sends tolerate socket-close races. Wrapper transports use stable process identity + resume credentials, generation-safe backend rebinding, a 30-second server grace period, bounded PTY-output buffering, capped reconnect backoff, and a bounded exit-frame flush. Graceful server shutdown preserves wrapper-owned PTYs; a restarted server rejects stale resume and the wrapper registers a new Session. Adapter-less scanned CLIs now start in Workgroups through raw passthrough; structured capabilities require a parser; installers build Camera in explicit dependency order; file uploads use hidden chunk sessions and atomic publication. Runtime support is aligned to Node.js 22+. Added Node/tsx lifecycle and upload tests, including ten consecutive real transport drops and server-restart recovery.
 - 2026-06-27 — v1.1 — **Multi-AI Workgroups** (Phase 8, §4.6): CLI scan + `claude` adapter; workgroup model (one-per-folder, dedupe, Option-B spawn); project-local `.switchboard/` shared context with AGENTS/CLAUDE injection; tasks + dispatch + peek; four-step workflow; manual handoff; live `/workgroups/ws` broadcast; atomic JSON persistence. `scripts/test-workgroups.ps1` 28/28 green. Token auto-switch intentionally not built (no usage-data source).
 - 2026-05-29 — **v1.0.0** — **First release.** Shipped since v0.9: (1) **Camera module** (`@switchboard/camera`, optional go2rtc sidecar) — phone-as-webcam (WebRTC WHIP) + remote IP-camera viewing; dual HTTP(5174)/HTTPS(5173) dev ports; self-signed cert with LAN-IP SANs. (2) **Fall-detection alarms → Web Push** — realizes the self-hosted VAPID Web Push plumbing from §4.4 / Q5: `POST /api/alarm` webhook (optional `X-Falldown-Signature` HMAC via `SWITCHBOARD_ALARM_SECRET`), VAPID keys auto-generated to `certs/`, `/api/push-subscribe` + service worker + PWA bell toggle; tapping a "检测到跌倒" notification opens the camera page. Trigger is an **external** detector, distinct from the planned agent-state-transition notifications (still future work). See the **Alarm notifications** section of the README. (3) All packages bumped 0.1.0 → 1.0.0.
 - 2026-05-23 — v0.9 — **Phase 2 gate PASSED**: live multi-client test confirmed across phone + desktop. Wrapper now honors server-driven resize when running headless (no local TTY), so background wrappers correctly adopt browser-negotiated PTY size. Quick-actions toolbar hidden on viewports ≥ 600px (physical keyboards present).
