@@ -69,6 +69,10 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     );
   };
 
+  // Lifecycle only. SessionManager deliberately does not raise an event for
+  // PTY output, because this handler answers every event with a full list
+  // snapshot — an output-driven event would repaint the session list in every
+  // open browser for as long as any CLI keeps printing.
   unsubscribeFromSessionList = sessions.subscribe(() => {
     send({ type: 'sessions', list: sessions.list() });
   });

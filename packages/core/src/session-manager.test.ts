@@ -50,8 +50,8 @@ class FakeBackend implements SessionBackend {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('publishes lifecycle events and throttles activity-only updates', async () => {
-  const manager = new SessionManager({ activityBroadcastIntervalMs: 20 });
+test('publishes lifecycle events but stays silent while a session only prints', async () => {
+  const manager = new SessionManager();
   manager.registerAdapter(adapter);
   const events: SessionManagerEvent[] = [];
   manager.subscribe((event) => events.push(event));
@@ -68,14 +68,17 @@ test('publishes lifecycle events and throttles activity-only updates', async () 
     ['created'],
   );
 
+  // Output must never be a list event. Every subscriber answers an event by
+  // re-sending the whole session list, so a printing CLI would repaint the
+  // session list in every open browser for as long as it prints.
   backend.pushData('one');
   backend.pushData('two');
   backend.pushData('three');
   await delay(30);
 
-  assert.equal(
-    events.filter((event) => event.type === 'updated' && event.reason === 'activity').length,
-    1,
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['created'],
   );
 
   backend.pushExit(0);

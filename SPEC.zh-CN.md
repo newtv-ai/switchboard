@@ -2,7 +2,7 @@
 
 > **一部手机，管所有 AI 编程 CLI。** 自部署 Web 应用 + 插件化 adapter 系统 + 原生 PTY 中继。本文是设计的唯一源头。
 >
-> **状态**：v1.3 · 最近更新：2026-07-26 · 核心会话生命周期整改 + 审计复审
+> **状态**：v1.3.1 · 最近更新：2026-07-27 · 核心会话生命周期整改 + 审计复审
 > **本文是单一事实来源。** 任何新功能、范围调整、架构决策**都必须在写代码之前/之中**反映到本文。如果实现和本文走偏，要么改本文，要么回滚实现。更新流程见 §11 变更日志。
 >
 > 🌐 **语言**: [English](./SPEC.md) · 中文
@@ -172,7 +172,7 @@
   - `action` `{ actionId, params? }` —— L3 语义动作（adapter 翻译）
   - `kill` `{ sessionId }`
 - **Server → Client**：
-  - `sessions` `{ list: SessionSummary[] }` —— 初始快照，以及连接仍停留在列表模式时的实时生命周期快照；仅活动时间变化的更新按每个 Session 每秒最多一次节流
+  - `sessions` `{ list: SessionSummary[] }` —— 初始快照，以及连接停留在列表模式期间每次 Session **生命周期**事件（创建 / 状态变化 / 传输变化 / 退出 / 移除）推送的实时快照。PTY 输出**刻意不算**生命周期事件：客户端收到一份快照就整表重渲染，输出驱动的推送会让所有打开的浏览器在 CLI 持续打印期间一直重绘会话列表。因此 `lastActivityAt` 和 `bufferBytes` 只在别的事件发生时才刷新。
   - `ready` `{ sessionId, adapter, capabilities, replay }`
   - `pty` `{ data }` —— 原始 ANSI 字节
   - `event` `{ event: AgentEvent }` —— 结构化事件（Phase 3+）
@@ -579,6 +579,7 @@ switchboard/
 
 ### 近期变更
 - 2026-07-26 — v1.3 — **审计复审修复**（针对 v1.2 整改的复审）：wrapped Session 传输断开时不再静默吞掉输入——新增 `SessionSummary.connected`、`/ws` 的 `transport` 帧、被拒绝的写入，以及界面上的 "wrapper offline" 标记。没收到 `registered` 回执的 wrapper 可凭 resumeKey 重新注册回同一个 Session，不必干等宽限期。会话列表按创建时间排序，实时更新不会让行在手指下重排。声明了 capability 却没有 parser 的 adapter 只会被降级并告警，不再让 server 启动失败。`AgentMember.command` 把 raw CLI 的命令与 adapter id 分开。上传改为由客户端声明 `chunkSize`、返回机器可读的错误 `code`，并支持显式 `overwrite` 原子覆盖。
+- 2026-07-27 — v1.3.1 — **会话列表重绘修复**：删掉 v1.2 引入的活动广播。它会为每个正在打印的 Session 发出节流事件，而列表订阅者收到任何事件都会回一份完整快照，导致停在会话列表页的浏览器在任意 CLI 有输出期间每秒重渲染一次（实测 1.05 次/秒）。列表快照现在完全由生命周期事件驱动。
 - 2026-07-23 — v1.2 — **核心可靠性整改**：列表模式 `/ws` 客户端实时收到 Session 快照，纯活动时间更新按 Session 节流；监听器按快照派发，清理不会吞掉浏览器退出帧；浏览器发送能容忍 socket 关闭竞态。wrapper 传输采用稳定进程标识与恢复凭据、带代际保护的后端重新绑定、30 秒 server 宽限期、有上限的 PTY 输出缓冲、封顶退避和限时退出帧 flush。server 正常关闭时保留 wrapper 拥有的 PTY；server 重启后拒绝旧 resume，wrapper 自动注册新 Session。扫描到但无 adapter 的 CLI 现在可通过 raw passthrough 加入工作群；结构化 capability 必须有 parser；安装器按明确依赖顺序构建 Camera；文件上传改为隐藏分块会话和原子发布；运行时基线统一为 Node.js 22+。新增 Node/tsx 生命周期与上传测试，覆盖真实传输连续十次闪断及 server 重启恢复。
 - 2026-06-27 — v1.1 — **多 AI 工作群**（Phase 8、§4.6）：CLI 扫描 + `claude` 适配器；工作群模型（一文件夹一群、去重、Option-B 启动）；项目内 `.switchboard/` 共享上下文 + AGENTS/CLAUDE 注入；任务 + 分派 + peek；四步工作流；手动交接；实时 `/workgroups/ws` 广播；原子 JSON 持久化。`scripts/test-workgroups.ps1` 28/28 通过。有意不做 token 自动切换（无用量数据源）。
 - 2026-05-29 — **v1.0.0** — **首个正式版。** v0.9 以来新增：(1) **摄像头模块**（`@switchboard/camera`，可选 go2rtc sidecar）—— 手机当摄像头（WebRTC WHIP）+ 远程查看 IP 摄像头；开发期 HTTP(5174)/HTTPS(5173) 双端口；自签证书含局域网 IP 的 SAN。(2) **跌倒告警 → Web Push** —— 落地了 §4.4 / Q5 规划的自托管 VAPID Web Push 管道：`POST /api/alarm` webhook（可选 `X-Falldown-Signature` HMAC，由 `SWITCHBOARD_ALARM_SECRET` 控制），VAPID 密钥首启自动生成到 `certs/`，`/api/push-subscribe` + service worker + PWA 铃铛开关；点"检测到跌倒"通知跳到摄像头页。触发源是**外部**检测器，与原计划的 agent 状态变更通知不同（后者仍是未来工作）。见 README 的**告警通知**一节。(3) 所有包 0.1.0 → 1.0.0。

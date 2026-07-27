@@ -18,7 +18,6 @@ export {
   SessionManager,
   type SessionManagerEvent,
   type SessionManagerListener,
-  type SessionManagerOpts,
   type SpawnOpts,
   type SpawnRawOpts,
   type RegisterOpts,

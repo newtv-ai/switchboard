@@ -34,13 +34,15 @@ export interface RegisterOpts {
   enableParser?: boolean;
 }
 
-export interface SessionManagerOpts {
-  activityBroadcastIntervalMs?: number;
-}
-
+/**
+ * Lifecycle only — deliberately NOT emitted for PTY output. Subscribers push a
+ * whole session-list snapshot per event, so an output-driven event means every
+ * browser sitting on the session list re-renders for as long as any session is
+ * printing. `lastActivityAt` freshness is not worth a periodic repaint.
+ */
 export type SessionManagerEvent =
   | { type: 'created'; sessionId: string }
-  | { type: 'updated'; sessionId: string; reason: 'activity' | 'state' | 'transport' }
+  | { type: 'updated'; sessionId: string; reason: 'state' | 'transport' }
   | { type: 'exited'; sessionId: string }
   | { type: 'removed'; sessionId: string };
 
@@ -48,22 +50,11 @@ export type SessionManagerListener = (event: SessionManagerEvent) => void;
 
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
-const DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS = 1000;
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly adapters = new Map<string, AgentAdapter>();
   private readonly listeners = new Set<SessionManagerListener>();
-  private readonly activityTimers = new Map<string, NodeJS.Timeout>();
-  private readonly lastActivityBroadcastAt = new Map<string, number>();
-  private readonly activityBroadcastIntervalMs: number;
-
-  constructor(opts: SessionManagerOpts = {}) {
-    const interval = opts.activityBroadcastIntervalMs ?? DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS;
-    this.activityBroadcastIntervalMs = Number.isFinite(interval)
-      ? Math.max(0, interval)
-      : DEFAULT_ACTIVITY_BROADCAST_INTERVAL_MS;
-  }
 
   registerAdapter(adapter: AgentAdapter): void {
     const id = adapter.manifest.id;
@@ -177,8 +168,8 @@ export class SessionManager {
 
   /**
    * Newest first, by creation time. Deliberately NOT by lastActivityAt: the
-   * list is pushed live now, and sorting by activity makes rows swap places
-   * under the user's finger every time a session prints something.
+   * list is pushed live on lifecycle events, and an activity-ordered list makes
+   * rows swap places under the user's finger while they are reaching for one.
    */
   list(): SessionSummary[] {
     return Array.from(this.sessions.values())
@@ -207,7 +198,6 @@ export class SessionManager {
       session.dispose();
     }
     this.sessions.clear();
-    this.clearActivityTimers();
     this.listeners.clear();
   }
 
@@ -222,7 +212,8 @@ export class SessionManager {
     // Cleanup-only listener: no initialSize means it does NOT participate in
     // PTY-size negotiation (see Session.attach docs).
     session.attach({
-      onData: () => this.scheduleActivityUpdate(session.id),
+      // No onData hook on purpose: see SessionManagerEvent. Output must not
+      // move the session list, or every list client repaints while a CLI runs.
       onState: () => this.emit({ type: 'updated', sessionId: session.id, reason: 'state' }),
       onTransport: () => this.emit({ type: 'updated', sessionId: session.id, reason: 'transport' }),
       onExit: () => {
@@ -230,7 +221,6 @@ export class SessionManager {
         // deferred (SPEC §9 Q3).
         const s = this.sessions.get(session.id);
         if (s) {
-          this.cancelActivityUpdate(session.id);
           this.emit({ type: 'exited', sessionId: session.id });
           s.dispose();
           this.sessions.delete(session.id);
@@ -238,37 +228,8 @@ export class SessionManager {
         }
       },
     });
-    this.lastActivityBroadcastAt.set(session.id, Date.now());
     this.emit({ type: 'created', sessionId: session.id });
     return session;
-  }
-
-  private scheduleActivityUpdate(sessionId: string): void {
-    if (this.activityTimers.has(sessionId)) return;
-
-    const last = this.lastActivityBroadcastAt.get(sessionId) ?? 0;
-    const remaining = Math.max(0, this.activityBroadcastIntervalMs - (Date.now() - last));
-    const timer = setTimeout(() => {
-      this.activityTimers.delete(sessionId);
-      if (!this.sessions.has(sessionId)) return;
-      this.lastActivityBroadcastAt.set(sessionId, Date.now());
-      this.emit({ type: 'updated', sessionId, reason: 'activity' });
-    }, remaining);
-    if (typeof timer.unref === 'function') timer.unref();
-    this.activityTimers.set(sessionId, timer);
-  }
-
-  private cancelActivityUpdate(sessionId: string): void {
-    const timer = this.activityTimers.get(sessionId);
-    if (timer) clearTimeout(timer);
-    this.activityTimers.delete(sessionId);
-    this.lastActivityBroadcastAt.delete(sessionId);
-  }
-
-  private clearActivityTimers(): void {
-    for (const timer of this.activityTimers.values()) clearTimeout(timer);
-    this.activityTimers.clear();
-    this.lastActivityBroadcastAt.clear();
   }
 
   private emit(event: SessionManagerEvent): void {

@@ -73,8 +73,8 @@ class FakeSocket extends EventEmitter {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('list-only browser connections receive live Session snapshots', async () => {
-  const manager = new SessionManager({ activityBroadcastIntervalMs: 20 });
+test('list-only browser connections get lifecycle snapshots, never output churn', async () => {
+  const manager = new SessionManager();
   manager.registerAdapter(adapter);
   const socket = new FakeSocket();
   bindWebSocket(socket as unknown as WebSocket, manager);
@@ -97,9 +97,13 @@ test('list-only browser connections receive live Session snapshots', async () =>
   });
   assert.equal(snapshots().at(-1)?.list[0]?.id, session.id);
 
+  // A session that is merely printing must not move the list. This is what
+  // made the session list repaint once a second on the phone while any CLI
+  // was running.
+  const beforeOutput = snapshots().length;
   backend.pushData('activity');
   await delay(30);
-  assert.equal(snapshots().at(-1)?.list[0]?.bufferBytes, Buffer.byteLength('activity'));
+  assert.equal(snapshots().length, beforeOutput, 'output alone must not push a snapshot');
 
   backend.pushExit(0);
   assert.deepEqual(snapshots().at(-1)?.list, []);
