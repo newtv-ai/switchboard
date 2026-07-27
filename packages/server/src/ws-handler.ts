@@ -30,7 +30,18 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     }
   };
 
-  const keepalive = setInterval(() => send({ type: 'ping' }), KEEPALIVE_MS);
+  // Diagnostics for connections that die on their own (phones on flaky links).
+  // A close code alone can't tell a dead link from a browser parking the page;
+  // how long the socket lived and whether keepalives were still being answered
+  // right before it went can. Counters only, printed under SWITCHBOARD_DEBUG.
+  const openedAt = Date.now();
+  let pingsSent = 0;
+  let pongsSeen = 0;
+
+  const keepalive = setInterval(() => {
+    pingsSent += 1;
+    send({ type: 'ping' });
+  }, KEEPALIVE_MS);
   if (typeof keepalive.unref === 'function') keepalive.unref();
 
   const stopSessionList = (): void => {
@@ -169,6 +180,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
           return;
         }
         case 'pong': {
+          pongsSeen += 1;
           return;
         }
         default: {
@@ -191,7 +203,7 @@ export function bindWebSocket(socket: WebSocket, sessions: SessionManager): void
     if (process.env.SWITCHBOARD_DEBUG) {
       // eslint-disable-next-line no-console
       console.log(
-        `[switchboard:debug] /ws ${reasonPrefix} ${detail || '(none)'} hasHandle=${Boolean(handle)} hasSession=${Boolean(session)}`,
+        `[switchboard:debug] /ws ${reasonPrefix} ${detail || '(none)'} aliveMs=${Date.now() - openedAt} pings=${pingsSent} pongs=${pongsSeen} hasHandle=${Boolean(handle)} hasSession=${Boolean(session)}`,
       );
     }
     handle?.detach();
