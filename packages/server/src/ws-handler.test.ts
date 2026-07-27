@@ -181,3 +181,64 @@ test('a socket close race does not interrupt Session output or cleanup', async (
   socket.close();
   await manager.shutdown();
 });
+
+test('a reattach replay equals the previous replay plus everything sent since', async () => {
+  // The web client skips repainting the terminal when the replay it gets on
+  // reattach is byte-identical to what it already wrote. That is only safe if
+  // the server guarantees this equality, so pin it here: a phone whose socket
+  // drops mid-session must not be handed a buffer that merely *looks* like
+  // what it has.
+  const manager = new SessionManager();
+  manager.registerAdapter(adapter);
+  const backend = new FakeBackend();
+  const session = manager.register({ adapterId: 'test', cwd: process.cwd(), backend });
+
+  const readyOf = (socket: FakeSocket): { replay: string } =>
+    socket.sent.find(
+      (m): m is { type: 'ready'; replay: string } =>
+        typeof m === 'object' && m !== null && (m as { type?: string }).type === 'ready',
+    ) as { replay: string };
+  const ptyOf = (socket: FakeSocket): string =>
+    socket.sent
+      .filter(
+        (m): m is { type: 'pty'; data: string } =>
+          typeof m === 'object' && m !== null && (m as { type?: string }).type === 'pty',
+      )
+      .map((m) => m.data)
+      .join('');
+
+  backend.pushData('before-attach ');
+
+  const first = new FakeSocket();
+  bindWebSocket(first as unknown as WebSocket, manager);
+  first.emit('message', Buffer.from(JSON.stringify({ type: 'attach', sessionId: session.id })));
+  const firstReplay = readyOf(first).replay;
+  assert.equal(firstReplay, 'before-attach ');
+
+  backend.pushData('while-attached ');
+  first.close();
+
+  // The drop loses nothing: what the second attach replays must be exactly
+  // what the first client had on screen.
+  const second = new FakeSocket();
+  bindWebSocket(second as unknown as WebSocket, manager);
+  second.emit('message', Buffer.from(JSON.stringify({ type: 'attach', sessionId: session.id })));
+  assert.equal(readyOf(second).replay, firstReplay + ptyOf(first));
+
+  // Output that arrives while nobody is attached must break the equality, so
+  // the client falls back to a full repaint instead of skipping one. The
+  // detach has to come first — a still-attached client receives the bytes as
+  // `pty` and would satisfy the equality legitimately.
+  const secondReplay = readyOf(second).replay;
+  const secondPty = ptyOf(second);
+  second.close();
+  backend.pushData('while-away');
+  const third = new FakeSocket();
+  bindWebSocket(third as unknown as WebSocket, manager);
+  third.emit('message', Buffer.from(JSON.stringify({ type: 'attach', sessionId: session.id })));
+  assert.notEqual(readyOf(third).replay, secondReplay + secondPty);
+  assert.equal(readyOf(third).replay, 'before-attach while-attached while-away');
+
+  third.close();
+  await manager.shutdown();
+});

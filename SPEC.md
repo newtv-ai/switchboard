@@ -173,7 +173,7 @@ Two WS endpoints, different purposes:
   - `kill` `{ sessionId }`
 - **Server → Client**:
   - `sessions` `{ list: SessionSummary[] }` — initial snapshot plus a live snapshot on every Session **lifecycle** event (created / state change / transport change / exited / removed) while the connection remains list-only. PTY output is deliberately **not** a lifecycle event: the client re-renders the whole list per snapshot, so an output-driven push repaints the session list in every open browser for as long as a CLI keeps printing. `lastActivityAt` and `bufferBytes` therefore refresh only when something else moves.
-  - `ready` `{ sessionId, adapter, capabilities, replay }`
+  - `ready` `{ sessionId, adapter, capabilities, replay }` — `replay` is the Session ring buffer, and it is a strict extension of what a previously-attached client already received (same chunks, same order). A client may therefore skip repainting when the replay it gets on reattach is byte-identical to what it has already written; any difference means it must wipe and rewrite, because layering a replay on top of existing content duplicates it.
   - `pty` `{ data }` — raw ANSI bytes
   - `event` `{ event: AgentEvent }` — structured event (Phase 3+)
   - `state` `{ state: AgentState }`

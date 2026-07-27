@@ -161,6 +161,15 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let activeSessionId = target.kind === 'attach' ? target.sessionId : undefined;
+    // What xterm currently holds, tracked so a reattach can prove the screen is
+    // already correct and skip repainting it. `renderedReplay` is the last
+    // replay we wrote wholesale; `appendedSinceReplay` is every `pty` chunk
+    // written on top of it. Bounded — past the cap we stop tracking and just
+    // repaint, which is the old behaviour.
+    const APPEND_TRACK_LIMIT = 256 * 1024;
+    let renderedReplay: string | null = null;
+    let appendedSinceReplay = '';
+    let appendOverflowed = false;
 
     const sendWs = (msg: ClientMessage): void => {
       // Keystrokes, swipe-to-PgUp and wheel-to-arrows all funnel through here.
@@ -219,16 +228,37 @@ export function TerminalView({ target, onBack }: TerminalViewProps): JSX.Element
             setSessionState(msg.summary.state);
             setWrapperConnected(msg.summary.connected);
             if (msg.replay) {
-              // Wipe xterm before replaying. 'ready' fires on EVERY (re)attach,
-              // including auto-reconnect after a transient WS drop. The server's
-              // replay buffer is the full source of truth for what should be on
-              // screen — writing it on top of whatever xterm already contains
-              // is what makes "刷新越多重复越多" happen.
-              term.reset();
-              term.write(msg.replay, () => term.scrollToBottom());
+              // 'ready' fires on EVERY (re)attach, including the auto-reconnect
+              // after a transient WS drop — and this link drops several times
+              // an hour, so this path decides whether a drop is invisible or a
+              // full-screen flash.
+              //
+              // When the server's buffer is byte-identical to what we have
+              // already written, the screen is provably correct and repainting
+              // it buys nothing but the flash. Any difference at all falls back
+              // to wipe-and-replay: the buffer is the source of truth, and
+              // writing it on top of existing content is what made
+              // "刷新越多重复越多".
+              const alreadyOnScreen =
+                !appendOverflowed &&
+                renderedReplay !== null &&
+                msg.replay === renderedReplay + appendedSinceReplay;
+              if (!alreadyOnScreen) {
+                term.reset();
+                term.write(msg.replay, () => term.scrollToBottom());
+              }
+              renderedReplay = msg.replay;
+              appendedSinceReplay = '';
+              appendOverflowed = false;
             }
             return;
           case 'pty': {
+            if (appendedSinceReplay.length + msg.data.length > APPEND_TRACK_LIMIT) {
+              appendOverflowed = true;
+              appendedSinceReplay = '';
+            } else if (!appendOverflowed) {
+              appendedSinceReplay += msg.data;
+            }
             const narrow = window.matchMedia('(max-width: 600px)').matches;
             if (narrow) {
               term.write(msg.data, () => term.scrollToBottom());

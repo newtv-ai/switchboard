@@ -173,7 +173,7 @@
   - `kill` `{ sessionId }`
 - **Server → Client**：
   - `sessions` `{ list: SessionSummary[] }` —— 初始快照，以及连接停留在列表模式期间每次 Session **生命周期**事件（创建 / 状态变化 / 传输变化 / 退出 / 移除）推送的实时快照。PTY 输出**刻意不算**生命周期事件：客户端收到一份快照就整表重渲染，输出驱动的推送会让所有打开的浏览器在 CLI 持续打印期间一直重绘会话列表。因此 `lastActivityAt` 和 `bufferBytes` 只在别的事件发生时才刷新。
-  - `ready` `{ sessionId, adapter, capabilities, replay }`
+  - `ready` `{ sessionId, adapter, capabilities, replay }` —— `replay` 就是 Session 的环形缓冲，且一定是此前已连接客户端所收到内容的严格延续（同样的分块、同样的顺序）。因此客户端在重连收到的 replay 与自己已写入的内容逐字节相同时，可以跳过重绘；只要有任何差异就必须清屏重写，因为把 replay 叠加在已有内容上会导致重复。
   - `pty` `{ data }` —— 原始 ANSI 字节
   - `event` `{ event: AgentEvent }` —— 结构化事件（Phase 3+）
   - `state` `{ state: AgentState }`
