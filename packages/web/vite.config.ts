@@ -229,10 +229,16 @@ export default defineConfig({
             // severed but not by whom. This proxy sits in the middle, so it is
             // the only place that can say which half broke first.
             const t0 = Date.now();
+            // Wall clock + peer address: with several phones on the LAN, "a
+            // socket reset" is only useful if you can say which device and
+            // line it up against an external reachability probe.
+            const peer = req.socket.remoteAddress?.replace(/^::ffff:/, '') ?? '?';
             const dbg = process.env.SWITCHBOARD_DEBUG
               ? (what: string) =>
                   // eslint-disable-next-line no-console
-                  console.log(`[mirror:debug] ${req.url} ${what} aliveMs=${Date.now() - t0}`)
+                  console.log(
+                    `[mirror:debug] ${new Date().toISOString()} ${peer} ${req.url} ${what} aliveMs=${Date.now() - t0}`,
+                  )
               : () => {};
             proxy.on('upgrade', (proxyRes, proxySocket: Duplex, proxyHead: Buffer) => {
               let rawHeaders = `HTTP/1.1 101 ${proxyRes.statusMessage || 'Switching Protocols'}\r\n`;
