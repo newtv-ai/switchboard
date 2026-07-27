@@ -130,6 +130,37 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      // Vite's dev client reloads the whole page whenever its WebSocket closes
+      // uncleanly:
+      //
+      //   socket.addEventListener('close', async ({ wasClean }) => {
+      //     if (wasClean) return;
+      //     await waitForSuccessfulPing(...); location.reload();
+      //   })
+      //
+      // A phone whose TCP connections get reset every 5-20s therefore reloads
+      // the entire page every 5-20s. That is the "the home page keeps
+      // refreshing" bug, measured with ECONNRESET on the client half of the
+      // proxy while a localhost client on the identical path stays up.
+      //
+      // `server.hmr: false` does NOT prevent this, and neither does removing
+      // the <script src="/@vite/client"> tag: Vite serves every CSS file as a
+      // JS module that imports the client for `updateStyle`, so one
+      // `import './styles.css'` drags it back in. The only thing that actually
+      // stops the reload is neutralising the call. HMR is off anyway, so a
+      // reload can never be delivering anything we asked for.
+      name: 'no-vite-auto-reload',
+      enforce: 'post',
+      transform(code: string, id: string) {
+        if (!id.includes('vite/dist/client/client.mjs')) return null;
+        if (!code.includes('location.reload()')) return null;
+        return code.replace(
+          /location\.reload\(\)/g,
+          "console.warn('[switchboard] vite auto-reload suppressed (see vite.config.ts)')",
+        );
+      },
+    },
+    {
       name: 'http-mirror',
       configureServer(server) {
         server.httpServer?.once('listening', () => {
@@ -161,6 +192,18 @@ export default defineConfig({
           const mirror = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
             const { client, options } = getTargetConfig(req);
             const proxy = client(options, (proxyRes) => {
+              // Which documents a phone actually re-fetches on reload is the
+              // only way to tell "served a stale page from cache" apart from
+              // "fetched a fresh page that still misbehaves".
+              if (
+                process.env.SWITCHBOARD_DEBUG &&
+                !/\.(js|ts|tsx|css|png|svg|ico|json|woff2?)($|\?)/.test(req.url ?? '')
+              ) {
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[mirror:req] ${req.method} ${req.url} -> ${proxyRes.statusCode} cc=${proxyRes.headers['cache-control'] ?? '-'} ifnm=${req.headers['if-none-match'] ? 'yes' : 'no'}`,
+                );
+              }
               res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
               proxyRes.pipe(res, { end: true });
             });
@@ -182,6 +225,15 @@ export default defineConfig({
             const { client, options } = getTargetConfig(req);
             const upgradeOpts = { ...options, method: 'GET' };
             const proxy = client(upgradeOpts);
+            // A phone-side WS that dies with code 1006 tells us the TCP link was
+            // severed but not by whom. This proxy sits in the middle, so it is
+            // the only place that can say which half broke first.
+            const t0 = Date.now();
+            const dbg = process.env.SWITCHBOARD_DEBUG
+              ? (what: string) =>
+                  // eslint-disable-next-line no-console
+                  console.log(`[mirror:debug] ${req.url} ${what} aliveMs=${Date.now() - t0}`)
+              : () => {};
             proxy.on('upgrade', (proxyRes, proxySocket: Duplex, proxyHead: Buffer) => {
               let rawHeaders = `HTTP/1.1 101 ${proxyRes.statusMessage || 'Switching Protocols'}\r\n`;
               for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
@@ -192,10 +244,27 @@ export default defineConfig({
               if (proxyHead.length) socket.write(proxyHead);
               proxySocket.pipe(socket);
               socket.pipe(proxySocket);
-              proxySocket.on('error', () => socket.destroy());
-              socket.on('error', () => proxySocket.destroy());
+              proxySocket.on('error', (e: Error) => {
+                dbg(`BACKEND socket error: ${e.message}`);
+                socket.destroy();
+              });
+              socket.on('error', (e: Error) => {
+                dbg(`CLIENT socket error: ${e.message}`);
+                proxySocket.destroy();
+              });
+              proxySocket.on('close', (hadError: boolean) =>
+                dbg(`backend socket close hadError=${hadError}`),
+              );
+              socket.on('close', (hadError: boolean) =>
+                dbg(`client socket close hadError=${hadError}`),
+              );
+              socket.on('timeout', () => dbg('CLIENT socket timeout fired'));
+              proxySocket.on('timeout', () => dbg('BACKEND socket timeout fired'));
             });
-            proxy.on('error', () => socket.destroy());
+            proxy.on('error', (e: Error) => {
+              dbg(`proxy request error: ${e.message}`);
+              socket.destroy();
+            });
             if (head.length) proxy.write(head);
             proxy.end();
           });
@@ -224,11 +293,11 @@ export default defineConfig({
   server: {
     port: HTTPS_PORT,
     host: '0.0.0.0',
-    // HMR disabled: phones reach the dev server over a self-signed-cert TLS link
-    // that periodically resets (ECONNRESET); on each drop Vite's HMR client
-    // reconnects and FULL-RELOADS the page — that's the "refreshes every few
-    // seconds" bug. We never hot-reload from the phone anyway; edit code then
-    // refresh manually (or serve a production build for real deployments).
+    // HMR disabled: phones reach the dev server over a link that periodically
+    // resets (ECONNRESET, measured every 5-20s), and hot updates over a socket
+    // that keeps dying are worthless. NOTE: this flag alone does NOT stop the
+    // page reloading on every drop — see the `no-vite-auto-reload` plugin
+    // above, which is what actually fixes that.
     hmr: false,
     https: { key: tls.key, cert: tls.cert },
     proxy: {
